@@ -81,7 +81,9 @@ android {
             )
         }
         jniLibs {
-            useLegacyPackaging = false
+            // Compress native libs inside the APK: GeckoView's libxul.so (~142 MB)
+            // shrinks dramatically. Slightly slower first launch, much smaller download.
+            useLegacyPackaging = true
         }
     }
 }
