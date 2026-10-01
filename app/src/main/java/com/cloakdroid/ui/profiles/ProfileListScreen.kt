@@ -1,6 +1,7 @@
 package com.cloakdroid.ui.profiles
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -123,11 +124,11 @@ fun ProfileListScreen(
     }
 
     Scaffold(
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
+        modifier = modifier.background(com.cloakdroid.ui.theme.CloakBrushes.background),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                color = androidx.compose.ui.graphics.Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.onSurface
             ) {
                 Column(
@@ -136,11 +137,7 @@ fun ProfileListScreen(
                         .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Text(
-                        text = "CloakDroid",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    com.cloakdroid.ui.theme.CloakUI.MetallicHeadline(text = "CloakDroid")
                     Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = query,
@@ -268,13 +265,19 @@ fun ProfileListScreen(
 
                         ElevatedCard(
                             onClick = { onEdit(profile.id) },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(
+                                    1.dp,
+                                    com.cloakdroid.ui.theme.CloakColors.GlassBorder,
+                                    MaterialTheme.shapes.medium
+                                ),
                             colors = CardDefaults.elevatedCardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                                contentColor = MaterialTheme.colorScheme.onSurface
                             ),
                             elevation = CardDefaults.elevatedCardElevation(
-                                defaultElevation = 2.dp
+                                defaultElevation = 0.dp
                             )
                         ) {
                             Row(
@@ -301,7 +304,7 @@ fun ProfileListScreen(
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Surface(
-                                        shape = MaterialTheme.shapes.small,
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
                                         color = badgeContainerColor,
                                         contentColor = badgeContentColor
                                     ) {

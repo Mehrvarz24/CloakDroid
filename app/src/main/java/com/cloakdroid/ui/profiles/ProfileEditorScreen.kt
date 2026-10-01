@@ -179,6 +179,8 @@ fun ProfileEditorScreen(
     }
 
     Scaffold(
+        modifier = Modifier.background(com.cloakdroid.ui.theme.CloakBrushes.background),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
