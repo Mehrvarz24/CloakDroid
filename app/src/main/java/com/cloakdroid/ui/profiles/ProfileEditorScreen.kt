@@ -198,14 +198,11 @@ fun ProfileEditorScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 HorizontalDivider(modifier = Modifier.padding(bottom = 12.dp))
-                Button(
+                com.cloakdroid.ui.theme.CloakButtons.GradientButton(
+                    text = "Save profile",
                     onClick = { saveAndFinish() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                ) {
-                    Text("Save")
-                }
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     ) { padding ->
@@ -389,7 +386,8 @@ fun ProfileEditorScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
-                            Button(
+                            com.cloakdroid.ui.theme.CloakButtons.GradientButton(
+                                text = "Test Proxy",
                                 onClick = {
                                     viewModel.testProxy(
                                         proxyType,
@@ -401,12 +399,9 @@ fun ProfileEditorScreen(
                                 },
                                 enabled = proxyHost.isNotBlank() &&
                                     (proxyPort.toIntOrNull() ?: 0) in 1..65535,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                            ) {
-                                Text("Test Proxy")
-                            }
+                                modifier = Modifier.fillMaxWidth(),
+                                height = 48.dp
+                            )
 
                             val result = testResult
                             when {
@@ -470,7 +465,7 @@ fun ProfileEditorScreen(
                                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            Button(
+                                            com.cloakdroid.ui.theme.CloakButtons.GhostButton(
                                                 onClick = {
                                                     timezone = result.suggestedTimezoneId
                                                     locale = result.suggestedLocale
@@ -483,9 +478,8 @@ fun ProfileEditorScreen(
                                                     autoSync = true
                                                 },
                                                 modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Text("Apply matching timezone, locale & location")
-                                            }
+                                            )
+                                            Text("Apply matching timezone, locale & location")
                                             Text(
                                                 text = "Fills the Spoofing tab from the proxy's location (${result.suggestedTimezoneId}, ${result.suggestedLocale}).",
                                                 style = MaterialTheme.typography.bodySmall,

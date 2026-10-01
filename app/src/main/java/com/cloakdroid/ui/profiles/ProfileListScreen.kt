@@ -173,22 +173,14 @@ fun ProfileListScreen(
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            com.cloakdroid.ui.theme.CloakButtons.GradientButton(
+                text = "+  New Profile",
                 onClick = {
                     val fresh = viewModel.newRandomProfile()
                     viewModel.save(fresh)
-                }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("New Profile", color = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
+                },
+                height = 52.dp
+            )
         }
     ) { innerPadding ->
         Column(
