@@ -243,7 +243,12 @@ class ProxyTester @Inject constructor(
         }
 
         val countryCode = geo.countryCode?.trim()?.uppercase().orEmpty().ifEmpty { "ZZ" }
-        val (timezoneId, locale) = timezoneAndLocaleFor(countryCode)
+        // Prefer the timezone reported by the geo service itself (exact city-
+        // level match), then fall back to the country-level map.
+        val geoTz = geo.timezone?.id?.trim().orEmpty()
+        val (mapTz, mapLocale) = timezoneAndLocaleFor(countryCode)
+        val tz = geoTz.ifEmpty { mapTz }
+        val locale = if (geoTz.isEmpty()) mapLocale else suggestedLocaleFor(tz)
 
         return ProxyTestResult.Success(
             latencyMs = latencyMs,
@@ -257,9 +262,26 @@ class ProxyTester @Inject constructor(
                 .ifEmpty { "Unknown" },
             lat = geo.latitude ?: geo.lat ?: 0.0,
             lon = geo.longitude ?: geo.lon ?: 0.0,
-            suggestedTimezoneId = timezoneId,
+            suggestedTimezoneId = tz,
             suggestedLocale = locale
         )
+    }
+
+    /** Derives a BCP-47 locale from an IANA timezone id, e.g.
+     *  "Asia/Kuala_Lumpur" -> "ms-MY"-style best effort using the city's
+     *  country from [COUNTRY_LOCALE_MAP] when available, otherwise a
+     *  language-neutral locale from the timezone region. */
+    private fun suggestedLocaleFor(tzId: String): String {
+        val region = tzId.substringAfter('/', "").replace('_', '-')
+        if (region.isEmpty()) return DEFAULT_LOCALE
+        val countryEntry = COUNTRY_LOCALE_MAP.entries.firstOrNull {
+            it.value.first.substringAfter('/') == region
+        }
+        return countryEntry?.value?.second ?: region.let { r ->
+            // Best-effort: use region code as locale region with English.
+            val parts = r.split("-")
+            if (parts.size == 2 && parts[1].length == 2) "en-${parts[1]}" else DEFAULT_LOCALE
+        }
     }
 
     private fun isAuthMessage(message: String?): Boolean {
@@ -343,7 +365,44 @@ class ProxyTester @Inject constructor(
             "CA" to ("America/Toronto" to "en-CA"),
             "AU" to ("Australia/Sydney" to "en-AU"),
             "NL" to ("Europe/Amsterdam" to "nl-NL"),
-            "SE" to ("Europe/Stockholm" to "sv-SE")
+            "SE" to ("Europe/Stockholm" to "sv-SE"),
+            "MY" to ("Asia/Kuala_Lumpur" to "ms-MY"),
+            "SG" to ("Asia/Singapore" to "en-SG"),
+            "HK" to ("Asia/Hong_Kong" to "zh-HK"),
+            "KR" to ("Asia/Seoul" to "ko-KR"),
+            "PH" to ("Asia/Manila" to "en-PH"),
+            "ID" to ("Asia/Jakarta" to "id-ID"),
+            "TH" to ("Asia/Bangkok" to "th-TH"),
+            "VN" to ("Asia/Ho_Chi_Minh" to "vi-VN"),
+            "TW" to ("Asia/Taipei" to "zh-TW"),
+            "ES" to ("Europe/Madrid" to "es-ES"),
+            "IT" to ("Europe/Rome" to "it-IT"),
+            "PL" to ("Europe/Warsaw" to "pl-PL"),
+            "CH" to ("Europe/Zurich" to "de-CH"),
+            "AT" to ("Europe/Vienna" to "de-AT"),
+            "IE" to ("Europe/Dublin" to "en-IE"),
+            "FI" to ("Europe/Helsinki" to "fi-FI"),
+            "NO" to ("Europe/Oslo" to "nb-NO"),
+            "DK" to ("Europe/Copenhagen" to "da-DK"),
+            "PT" to ("Europe/Lisbon" to "pt-PT"),
+            "BE" to ("Europe/Brussels" to "nl-BE"),
+            "UA" to ("Europe/Kyiv" to "uk-UA"),
+            "ZA" to ("Africa/Johannesburg" to "en-ZA"),
+            "MX" to ("America/Mexico_City" to "es-MX"),
+            "AR" to ("America/Argentina/Buenos_Aires" to "es-AR"),
+            "CL" to ("America/Santiago" to "es-CL"),
+            "CO" to ("America/Bogota" to "es-CO"),
+            "IL" to ("Asia/Jerusalem" to "he-IL"),
+            "SA" to ("Asia/Riyadh" to "ar-SA"),
+            "QA" to ("Asia/Qatar" to "ar-QA"),
+            "PK" to ("Asia/Karachi" to "ur-PK"),
+            "BD" to ("Asia/Dhaka" to "bn-BD"),
+            "EG" to ("Africa/Cairo" to "ar-EG"),
+            "NG" to ("Africa/Lagos" to "en-NG"),
+            "RO" to ("Europe/Bucharest" to "ro-RO"),
+            "CZ" to ("Europe/Prague" to "cs-CZ"),
+            "GR" to ("Europe/Athens" to "el-GR"),
+            "HU" to ("Europe/Budapest" to "hu-HU")
         )
     }
 }

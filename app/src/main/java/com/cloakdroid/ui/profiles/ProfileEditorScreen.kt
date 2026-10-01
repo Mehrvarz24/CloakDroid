@@ -469,6 +469,28 @@ fun ProfileEditorScreen(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                                             )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Button(
+                                                onClick = {
+                                                    timezone = result.suggestedTimezoneId
+                                                    locale = result.suggestedLocale
+                                                    latitude = String.format(
+                                                        java.util.Locale.US, "%.4f", result.lat
+                                                    )
+                                                    longitude = String.format(
+                                                        java.util.Locale.US, "%.4f", result.lon
+                                                    )
+                                                    autoSync = true
+                                                },
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text("Apply matching timezone, locale & location")
+                                            }
+                                            Text(
+                                                text = "Fills the Spoofing tab from the proxy's location (${result.suggestedTimezoneId}, ${result.suggestedLocale}).",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
                                         }
                                     }
                                 }
