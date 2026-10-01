@@ -203,7 +203,6 @@
 -keep @kotlinx.serialization.Serializable class * { *; }
 -keepclassmembers @kotlinx.serialization.Serializable class * {
     static ** Companion;
-    static **$Companion;
     kotlinx.serialization.KSerializer serializer(...);
 }
 
