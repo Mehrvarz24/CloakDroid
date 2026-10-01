@@ -115,6 +115,12 @@ class ProfileRepository @Inject constructor(
 
     private fun cacheDir(id: String): File = File(sandboxDir(id), "cache")
 
+    /**
+     * Runs a proxy test and persists the outcome — but only for profiles that
+     * actually exist in the DB. Ad-hoc tests (from the editor before Save use
+     * the synthetic id "adhoc") violate the proxy_test_results FK, so their
+     * results stay in memory/UI only.
+     */
     suspend fun testProxyFor(profile: ProfileEntity): ProxyTestResult {
         val rawType = profile.proxyType.uppercase()
         val proxyType = when {
@@ -135,32 +141,36 @@ class ProfileRepository @Inject constructor(
 
         val result = proxyTester.test(config)
 
-        val entity = ProxyTestResultEntity(
-            profileId = profile.id,
-            success = result is ProxyTestResult.Success,
-            latencyMs = when (result) {
-                is ProxyTestResult.Success -> result.latencyMs
-                else -> 0L
-            },
-            publicIp = when (result) {
-                is ProxyTestResult.Success -> result.publicIp
-                else -> null
-            },
-            countryCode = when (result) {
-                is ProxyTestResult.Success -> result.countryCode
-                else -> null
-            },
-            city = when (result) {
-                is ProxyTestResult.Success -> result.city
-                else -> null
-            },
-            isp = when (result) {
-                is ProxyTestResult.Success -> result.isp
-                else -> null
-            },
-            testedAt = System.currentTimeMillis()
-        )
-        dao.insertTestResult(entity)
+        val profileExists = profile.id != "adhoc" &&
+            withContext(Dispatchers.IO) { dao.getById(profile.id) != null }
+        if (profileExists) {
+            val entity = ProxyTestResultEntity(
+                profileId = profile.id,
+                success = result is ProxyTestResult.Success,
+                latencyMs = when (result) {
+                    is ProxyTestResult.Success -> result.latencyMs
+                    else -> 0L
+                },
+                publicIp = when (result) {
+                    is ProxyTestResult.Success -> result.publicIp
+                    else -> null
+                },
+                countryCode = when (result) {
+                    is ProxyTestResult.Success -> result.countryCode
+                    else -> null
+                },
+                city = when (result) {
+                    is ProxyTestResult.Success -> result.city
+                    else -> null
+                },
+                isp = when (result) {
+                    is ProxyTestResult.Success -> result.isp
+                    else -> null
+                },
+                testedAt = System.currentTimeMillis()
+            )
+            dao.insertTestResult(entity)
+        }
 
         return result
     }
