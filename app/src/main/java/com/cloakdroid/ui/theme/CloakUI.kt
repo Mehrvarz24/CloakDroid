@@ -16,7 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -87,11 +87,16 @@ object CloakUI {
         modifier: Modifier = Modifier
     ) {
         Column(modifier = modifier) {
+            // NOTE: the previous variant rendered the same text twice, the copy
+            // behind with Modifier.blur(22.dp). On several devices (notably
+            // Samsung Exynos, e.g. SM-A725F) RenderEffect-based blur of text
+            // renders as an unreadable smudged strip instead of a glow, so the
+            // glow layer was replaced with a plain translucent shadow.
             Text(
                 text = text,
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
-                modifier = Modifier.blur(22.dp)
+                modifier = Modifier.graphicsLayer(alpha = 0.25f)
             )
             Text(
                 text = text,
