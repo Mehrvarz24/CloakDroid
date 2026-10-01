@@ -116,6 +116,33 @@ class ProfileRepository @Inject constructor(
     private fun cacheDir(id: String): File = File(sandboxDir(id), "cache")
 
     /**
+     * Builds the [ProxyConfig] for a profile without testing it. Returns a
+     * DIRECT config when the profile has no host set.
+     */
+    fun proxyConfigFor(profileId: String): ProxyConfig? =
+        kotlinx.coroutines.runBlocking { proxyConfigForSuspend(profileId) }
+
+    private suspend fun proxyConfigForSuspend(profileId: String): ProxyConfig? {
+        val profile = dao.getById(profileId) ?: return null
+        if (profile.proxyHost.isNullOrBlank()) return null
+        val rawType = profile.proxyType.uppercase()
+        val proxyType = when {
+            rawType.contains("SOCKS") -> ProxyType.SOCKS5
+            rawType.contains("HTTPS") -> ProxyType.HTTPS
+            rawType.contains("HTTP") -> ProxyType.HTTP
+            else -> ProxyType.DIRECT
+        }
+        if (proxyType == ProxyType.DIRECT) return null
+        return ProxyConfig(
+            host = profile.proxyHost,
+            port = profile.proxyPort,
+            username = profile.proxyUsername,
+            password = profile.proxyPassword,
+            type = proxyType
+        )
+    }
+
+    /**
      * Runs a proxy test and persists the outcome — but only for profiles that
      * actually exist in the DB. Ad-hoc tests (from the editor before Save use
      * the synthetic id "adhoc") violate the proxy_test_results FK, so their

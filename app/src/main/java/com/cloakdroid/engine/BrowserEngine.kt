@@ -9,6 +9,7 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
+import com.cloakdroid.data.network.ProxyConfig
 import org.mozilla.geckoview.WebResponse
 
 /**
@@ -48,23 +49,134 @@ class BrowserEngine @Inject constructor(
      * Lazily created, process wide [GeckoRuntime]. Safe to call from any
      * thread, any number of times: the runtime is created exactly once.
      */
+    /**
+     * The proxy currently configured on the runtime, or null for direct.
+     * Changing it after the runtime exists requires a runtime restart; the
+     * caller (GeckoSessionManager) recreates the runtime when the profile's
+     * proxy differs from the active one.
+     */
+    @Volatile
+    var activeProxy: ProxyConfig? = null
+        private set
+
+    fun runtimeMatchesProxy(proxy: ProxyConfig?): Boolean =
+        runtimeRef != null && activeProxy == proxy
+
     val runtime: GeckoRuntime
         get() {
             runtimeRef?.let { cached -> return cached }
             synchronized(runtimeLock) {
                 runtimeRef?.let { cached -> return cached }
 
-                val settings = GeckoRuntimeSettings.Builder()
-                    .consoleOutput(true)
-                    .build()
-                
-
+                val settings = buildSettings(activeProxy)
                 val created = GeckoRuntime.create(appContext, settings)
+                applyPrefs(created, pendingPrefs)
                 runtimeRef = created
                 Log.i(TAG, "GeckoRuntime created (single process wide instance)")
                 return created
             }
         }
+
+    /** Destroys the current runtime so a new one with different proxy prefs
+     *  can be created. GeckoView allows only one runtime per process, so this
+     *  is only valid before any session is open. */
+    fun resetRuntime(proxy: ProxyConfig?) {
+        synchronized(runtimeLock) {
+            if (activeProxy == proxy && runtimeRef != null) return
+            runtimeRef?.let { old ->
+                try { old.shutdown() } catch (t: Throwable) {
+                    Log.w(TAG, "runtime shutdown failed", t)
+                }
+            }
+            runtimeRef = null
+            activeProxy = proxy
+            Log.i(TAG, "GeckoRuntime reset for proxy=${proxy?.type}")
+        }
+    }
+
+    /** Prefs pending application to the next created runtime. */
+    private var pendingPrefs: Map<String, Any> = emptyMap()
+
+    /**
+     * Builds the Gecko proxy prefs for [proxy]. Keys are standard
+     * `network.proxy.*` preference names; values are String/Int/Boolean.
+     */
+    private fun proxyPrefs(proxy: ProxyConfig?): Map<String, Any> {
+        if (proxy == null || proxy.type == com.cloakdroid.data.network.ProxyType.DIRECT) {
+            return emptyMap()
+        }
+        val host = proxy.host.orEmpty().trim()
+        val port = proxy.port ?: 0
+        if (host.isBlank() || port !in 1..65535) return emptyMap()
+
+        val prefs = LinkedHashMap<String, Any>()
+        prefs["network.proxy.type"] = 1 // manual
+        when (proxy.type) {
+            com.cloakdroid.data.network.ProxyType.SOCKS5 -> {
+                prefs["network.proxy.socks"] = host
+                prefs["network.proxy.socks_port"] = port
+                prefs["network.proxy.socks_version"] = 5
+                prefs["network.proxy.socks5_remote_dns"] = true
+                prefs["network.proxy.socks_remote_dns"] = true
+                // HTTPS-over-SOCKS (ssl pref) so https:// also routes through.
+                prefs["network.proxy.ssl"] = host
+                prefs["network.proxy.ssl_port"] = port
+            }
+            else -> {
+                // HTTP / HTTPS CONNECT proxy for both plain and TLS traffic.
+                prefs["network.proxy.http"] = host
+                prefs["network.proxy.http_port"] = port
+                prefs["network.proxy.ssl"] = host
+                prefs["network.proxy.ssl_port"] = port
+                prefs["network.proxy.share_proxy_settings"] = true
+            }
+        }
+        return prefs
+    }
+
+    private fun buildSettings(proxy: ProxyConfig?): GeckoRuntimeSettings {
+        val b = GeckoRuntimeSettings.Builder().consoleOutput(true)
+        val prefs = proxyPrefs(proxy)
+        if (prefs.isNotEmpty()) {
+            // Belt-and-braces: env vars read by some Gecko system-proxy paths.
+            val host = proxy!!.host
+            val port = proxy.port
+            val extras = android.os.Bundle()
+            extras.putString("env0", "HTTP_PROXY=http://$host:$port")
+            extras.putString("env1", "HTTPS_PROXY=http://$host:$port")
+            extras.putString("env2", "http_proxy=http://$host:$port")
+            b.extras(extras)
+        }
+        pendingPrefs = prefs
+        return b.build()
+    }
+
+    /**
+     * Applies [prefs] as Gecko default prefs on the freshly created runtime via
+     * the package-private GeckoRuntime.setDefaultPrefs(GeckoBundle). This is the
+     * same channel GeckoRuntimeSettings uses internally ("GeckoView:SetDefaultPrefs").
+     */
+    private fun applyPrefs(runtime: GeckoRuntime, prefs: Map<String, Any>) {
+        if (prefs.isEmpty()) return
+        try {
+            val bundle = org.mozilla.gecko.util.GeckoBundle(prefs.size)
+            prefs.forEach { (name, value) ->
+                when (value) {
+                    is Int -> bundle.putInt(name, value)
+                    is Boolean -> bundle.putBoolean(name, value)
+                    is String -> bundle.putString(name, value)
+                }
+            }
+            val method = GeckoRuntime::class.java.getDeclaredMethod(
+                "setDefaultPrefs", org.mozilla.gecko.util.GeckoBundle::class.java
+            )
+            method.isAccessible = true
+            method.invoke(runtime, bundle)
+            Log.i(TAG, "Applied ${'$'}{prefs.size} proxy prefs to runtime")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to apply proxy prefs", t)
+        }
+    }
 
     /** `true` once the runtime has been materialised (never creates it). */
     val isRuntimeCreated: Boolean

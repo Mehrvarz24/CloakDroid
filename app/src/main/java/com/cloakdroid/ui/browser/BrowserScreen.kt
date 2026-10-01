@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,10 +102,12 @@ fun BrowserScreen(
     } else MaterialTheme.colorScheme.primary
     val profileName = profile?.name ?: "Profile"
 
-    // Keep the URL field in sync with whatever the engine is currently displaying.
+    // Keep the URL field in sync with the engine's live location, but never
+    // while the user is typing in it (focus check).
+    val urlFieldFocused = remember { androidx.compose.runtime.mutableStateOf(false) }
     LaunchedEffect(currentUrl) {
         val url = currentUrl
-        if (!url.isNullOrBlank()) {
+        if (!url.isNullOrBlank() && !urlFieldFocused.value) {
             urlInput = url
         }
     }
@@ -141,7 +144,8 @@ fun BrowserScreen(
                 onValueChange = { urlInput = it },
                 modifier = Modifier
                     .weight(1f)
-                    .height(56.dp),
+                    .height(56.dp)
+                    .onFocusChanged { urlFieldFocused.value = it.isFocused },
                 singleLine = true,
                 placeholder = { Text("Search or enter address") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),

@@ -61,6 +61,15 @@ class GeckoSessionManager @Inject constructor(
     fun launch(profileId: String, url: String): GeckoSession = synchronized(lock) {
         closeCurrentLocked()
 
+        // Ensure the process-wide runtime matches this profile's proxy. The
+        // runtime is recreated when the proxy changed since the last launch
+        // (only safe while no session is open, which closeCurrentLocked
+        // guarantees).
+        val proxy = repository.proxyConfigFor(profileId)
+        if (!engine.runtimeMatchesProxy(proxy)) {
+            engine.resetRuntime(proxy)
+        }
+
         val session = engine.newSession()
         engine.applyProfileSettings(session, profileUserAgents[profileId])
 
