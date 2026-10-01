@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CloakDroid" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#121316</item>
+        <item name="android:windowBackground">#121316</item>
+    </style>
+</resources>
