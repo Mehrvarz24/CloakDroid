@@ -51,6 +51,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +74,35 @@ private const val PROXY_HTTPS = "HTTPS"
 private const val PROXY_DIRECT = "DIRECT"
 
 private val ProxyTypeOptions = listOf(PROXY_SOCKS5, PROXY_HTTP, PROXY_HTTPS, PROXY_DIRECT)
+
+/** 3-state WebRTC policy shown as radio buttons in the Spoofing tab. */
+private enum class WebRtcPolicyOption(
+    val label: String,
+    val description: String
+) {
+    DISABLED(
+        "Disabled",
+        "WebRTC is removed entirely - strongest protection"
+    ),
+    PROXY_ONLY(
+        "Proxy-only",
+        "WebRTC stays usable but host candidates are stripped, so the real IP never leaks"
+    ),
+    FULL(
+        "Full",
+        "WebRTC untouched - not recommended behind a proxy"
+    );
+
+    companion object {
+        fun from(stored: String?, legacyEnabled: Boolean): WebRtcPolicyOption {
+            entries.firstOrNull { it.name.equals(stored, ignoreCase = true) }
+                ?.let { return it }
+            // Fall back to the old boolean toggle for profiles saved before
+            // the policy field existed.
+            return if (legacyEnabled) FULL else DISABLED
+        }
+    }
+}
 
 private val TagColorOptions = listOf(
     "0xFFE53935", // red
@@ -123,11 +157,19 @@ fun ProfileEditorScreen(
     var autoSync by rememberSaveable { mutableStateOf(true) }
     var latitude by rememberSaveable { mutableStateOf("") }
     var longitude by rememberSaveable { mutableStateOf("") }
-    var webRtcSpoof by rememberSaveable { mutableStateOf(true) }
+    var webRtcPolicy by rememberSaveable { mutableStateOf(WebRtcPolicyOption.DISABLED.name) }
     var canvasNoise by rememberSaveable { mutableStateOf(true) }
     var audioNoise by rememberSaveable { mutableStateOf(true) }
     var timezone by rememberSaveable { mutableStateOf("") }
     var locale by rememberSaveable { mutableStateOf("") }
+    var screenWText by rememberSaveable { mutableStateOf("") }
+    var screenHText by rememberSaveable { mutableStateOf("") }
+    var dprText by rememberSaveable { mutableStateOf("") }
+    var deviceName by rememberSaveable { mutableStateOf("") }
+    var pendingFingerprintHash by rememberSaveable { mutableStateOf("") }
+    var generating by remember { mutableStateOf(false) }
+    var regenerateTick by remember { mutableStateOf(0) }
+    val editorScope = rememberCoroutineScope()
 
     var loaded by remember(profileId) { mutableStateOf(profileId == null) }
 
@@ -146,7 +188,12 @@ fun ProfileEditorScreen(
         autoSync = existing.autoSyncGeolocation
         latitude = existing.spoofLat?.toString() ?: ""
         longitude = existing.spoofLon?.toString() ?: ""
-        webRtcSpoof = existing.webrtcEnabled
+        webRtcPolicy = WebRtcPolicyOption.from(existing.webrtcPolicy, existing.webrtcEnabled).name
+        screenWText = existing.screenW?.toString() ?: ""
+        screenHText = existing.screenH?.toString() ?: ""
+        dprText = existing.devicePixelRatio?.toString() ?: ""
+        deviceName = existing.deviceName ?: ""
+        pendingFingerprintHash = existing.fingerprintHash ?: ""
         canvasNoise = existing.canvasNoise
         audioNoise = existing.audioNoise
         timezone = existing.timezoneId
@@ -170,7 +217,13 @@ fun ProfileEditorScreen(
             autoSyncGeolocation = autoSync,
             spoofLat = latitude.toDoubleOrNull(),
             spoofLon = longitude.toDoubleOrNull(),
-            webrtcEnabled = webRtcSpoof,
+            webrtcEnabled = webRtcPolicy != WebRtcPolicyOption.DISABLED.name,
+            webrtcPolicy = webRtcPolicy,
+            screenW = screenWText.toIntOrNull(),
+            screenH = screenHText.toIntOrNull(),
+            devicePixelRatio = dprText.toFloatOrNull(),
+            deviceName = deviceName.trim().ifEmpty { null },
+            fingerprintHash = pendingFingerprintHash.ifEmpty { null },
             canvasNoise = canvasNoise,
             audioNoise = audioNoise,
             timezoneId = timezone.trim().ifEmpty { "UTC" },
@@ -466,6 +519,7 @@ fun ProfileEditorScreen(
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             com.cloakdroid.ui.theme.CloakButtons.GhostButton(
+                                                text = "Apply matching timezone, locale & location",
                                                 onClick = {
                                                     timezone = result.suggestedTimezoneId
                                                     locale = result.suggestedLocale
@@ -479,7 +533,6 @@ fun ProfileEditorScreen(
                                                 },
                                                 modifier = Modifier.fillMaxWidth()
                                             )
-                                            Text("Apply matching timezone, locale & location")
                                             Text(
                                                 text = "Fills the Spoofing tab from the proxy's location (${result.suggestedTimezoneId}, ${result.suggestedLocale}).",
                                                 style = MaterialTheme.typography.bodySmall,
@@ -536,12 +589,148 @@ fun ProfileEditorScreen(
 
                         SectionTitle(text = "Fingerprint")
 
-                        ToggleRow(
-                            title = "WebRTC spoofing",
-                            subtitle = "Mask local and public WebRTC addresses",
-                            checked = webRtcSpoof,
-                            onCheckedChange = { webRtcSpoof = it }
+                        com.cloakdroid.ui.theme.CloakButtons.GradientButton(
+                            text = if (generating) "Generating…" else "Generate fingerprint",
+                            onClick = {
+                                generating = true
+                                editorScope.launch {
+                                    val identity = viewModel.generateUniqueIdentity()
+                                    if (identity != null) {
+                                        userAgent = identity.userAgent
+                                        screenWText = identity.screenW.toString()
+                                        screenHText = identity.screenH.toString()
+                                        dprText = identity.devicePixelRatio.toString()
+                                        deviceName = identity.deviceName
+                                        pendingFingerprintHash = identity.fingerprintHash
+                                    }
+                                    regenerateTick++
+                                    generating = false
+                                }
+                            },
+                            enabled = !generating,
+                            modifier = Modifier.fillMaxWidth(),
+                            height = 48.dp
                         )
+                        if (pendingFingerprintHash.isNotEmpty()) {
+                            Text(
+                                text = "Fingerprint generated" +
+                                    " • unique hash ${pendingFingerprintHash.take(8)}…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text(
+                                text = "Generates a consistent identity (UA, screen, " +
+                                    "device, cores, memory, noise seed) that no other " +
+                                    "profile uses.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        val pulseAlpha by animateFloatAsState(
+                            targetValue = if (regenerateTick % 2 == 0) 1f else 0.55f,
+                            animationSpec = tween(durationMillis = 320),
+                            label = "regeneratePulse"
+                        )
+
+                        OutlinedTextField(
+                            value = userAgent,
+                            onValueChange = { userAgent = it },
+                            label = { Text("User-Agent") },
+                            singleLine = false,
+                            maxLines = 3,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer { alpha = pulseAlpha }
+                        )
+
+                        OutlinedTextField(
+                            value = deviceName,
+                            onValueChange = { deviceName = it },
+                            label = { Text("Device name (e.g. Samsung Galaxy S23)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer { alpha = pulseAlpha }
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = screenWText,
+                                onValueChange = { screenWText = it.filter { c -> c.isDigit() } },
+                                label = { Text("Screen width") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer { alpha = pulseAlpha }
+                            )
+                            OutlinedTextField(
+                                value = screenHText,
+                                onValueChange = { screenHText = it.filter { c -> c.isDigit() } },
+                                label = { Text("Screen height") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer { alpha = pulseAlpha }
+                            )
+                            OutlinedTextField(
+                                value = dprText,
+                                onValueChange = { dprText = it.filter { c -> c.isDigit() || c == '.' } },
+                                label = { Text("Pixel ratio") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer { alpha = pulseAlpha }
+                            )
+                        }
+
+                        HorizontalDivider()
+
+                        SectionTitle(text = "WebRTC policy")
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            WebRtcPolicyOption.entries.forEach { option ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .selectable(
+                                            selected = webRtcPolicy == option.name,
+                                            onClick = { webRtcPolicy = option.name }
+                                        )
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = webRtcPolicy == option.name,
+                                        onClick = { webRtcPolicy = option.name }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = option.label,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Text(
+                                            text = option.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider()
+
+                        SectionTitle(text = "Noise")
+
                         ToggleRow(
                             title = "Canvas noise",
                             subtitle = "Add random noise to canvas fingerprints",

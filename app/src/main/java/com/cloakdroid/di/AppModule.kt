@@ -3,6 +3,8 @@ package com.cloakdroid.di
 import android.content.Context
 import androidx.room.Room
 import com.cloakdroid.data.local.AppDatabase
+import com.cloakdroid.data.local.BookmarkDao
+import com.cloakdroid.data.local.HistoryDao
 import com.cloakdroid.data.local.ProfileDao
 import dagger.Module
 import dagger.Provides
@@ -39,11 +41,24 @@ object AppModule {
         context.applicationContext,
         AppDatabase::class.java,
         "cloakdroid.db"
-    ).build()
+    ).apply {
+        // v1 -> v2 adds WebRTC policy / screen & device columns plus the
+        // bookmarks and history tables; these are not worth a hand written
+        // migration, so existing data is rebuilt instead.
+        fallbackToDestructiveMigration()
+    }.build()
 
     @Provides
     @Singleton
     fun provideProfileDao(database: AppDatabase): ProfileDao = database.profileDao()
+
+    @Provides
+    @Singleton
+    fun provideBookmarkDao(database: AppDatabase): BookmarkDao = database.bookmarkDao()
+
+    @Provides
+    @Singleton
+    fun provideHistoryDao(database: AppDatabase): HistoryDao = database.historyDao()
 
     @Provides
     @Singleton

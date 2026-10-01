@@ -1,5 +1,10 @@
 package com.cloakdroid.ui
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -25,7 +30,34 @@ interface GeckoSessionManagerEntryPoint {
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "profiles") {
+    NavHost(
+        navController = navController,
+        startDestination = "profiles",
+        enterTransition = {
+            slideInHorizontally(
+                animationSpec = tween(320),
+                initialOffsetX = { it / 4 }
+            ) + fadeIn(tween(320))
+        },
+        exitTransition = {
+            slideOutHorizontally(
+                animationSpec = tween(320),
+                targetOffsetX = { -it / 5 }
+            ) + fadeOut(tween(220))
+        },
+        popEnterTransition = {
+            slideInHorizontally(
+                animationSpec = tween(320),
+                initialOffsetX = { -it / 5 }
+            ) + fadeIn(tween(320))
+        },
+        popExitTransition = {
+            slideOutHorizontally(
+                animationSpec = tween(320),
+                targetOffsetX = { it / 4 }
+            ) + fadeOut(tween(220))
+        }
+    ) {
         composable("profiles") { backStackEntry ->
             val viewModel: ProfileViewModel = androidx.hilt.navigation.compose.hiltViewModel()
             ProfileListScreen(

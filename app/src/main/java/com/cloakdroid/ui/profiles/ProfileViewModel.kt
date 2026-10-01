@@ -2,10 +2,14 @@ package com.cloakdroid.ui.profiles
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cloakdroid.data.fingerprint.FingerprintGenerator
+import com.cloakdroid.data.fingerprint.GeneratedIdentity
+import com.cloakdroid.data.local.BookmarkEntity
 import com.cloakdroid.data.local.ProfileEntity
 import com.cloakdroid.data.network.ProxyTestResult
 import com.cloakdroid.data.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -15,14 +19,38 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val repo: ProfileRepository
+    private val repo: ProfileRepository,
+    private val fingerprintGenerator: FingerprintGenerator
 ) : ViewModel() {
+
+    companion object {
+        /** Max attempts when searching for an unused fingerprint hash. */
+        private const val UNIQUENESS_RETRY_LIMIT = 50
+
+        private val ADJECTIVES = listOf(
+            "Silent", "Crimson", "Velvet", "Iron", "Shadow", "Frost",
+            "Neon", "Obsidian", "Azure", "Swift", "Hollow", "Radiant"
+        )
+
+        private val ANIMALS = listOf(
+            "Fox", "Raven", "Wolf", "Panther", "Lynx", "Viper",
+            "Heron", "Otter", "Jackal", "Falcon", "Moth", "Badger"
+        )
+
+        private val TAG_COLORS = listOf(
+            "0xFF6366F1", "0xFF22C55E", "0xFFEF4444", "0xFFF59E0B",
+            "0xFF06B6D4", "0xFFEC4899", "0xFF8B5CF6", "0xFF14B8A6"
+        )
+    }
 
     val profiles: StateFlow<List<ProfileEntity>> = repo.observeProfiles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val testResult = MutableStateFlow<ProxyTestResult?>(null)
     val testing = MutableStateFlow(false)
+
+    /** Number of profiles created by the most recent batch generation. */
+    val lastBatchCreated = MutableStateFlow(0)
 
     fun save(profile: ProfileEntity) {
         viewModelScope.launch { repo.saveProfile(profile) }
@@ -76,6 +104,61 @@ class ProfileViewModel @Inject constructor(
         )
     }
 
+    // ------------------------------------------------------- fingerprinting
+
+    /**
+     * Generates a fresh identity and retries (up to
+     * [UNIQUENESS_RETRY_LIMIT] tries) until its fingerprint hash is not
+     * already used by any existing profile or by [taken] hashes.
+     *
+     * @return the identity, or `null` when no unique one was found in time.
+     */
+    suspend fun generateUniqueIdentity(
+        taken: Set<String> = emptySet()
+    ): GeneratedIdentity? {
+        val existing = repo.existingFingerprintHashes() + taken
+        repeat(UNIQUENESS_RETRY_LIMIT) {
+            val candidate = fingerprintGenerator.generate()
+            if (candidate.fingerprintHash !in existing) {
+                return candidate
+            }
+        }
+        return null
+    }
+
+    /** Creates [count] unique profiles at once with distinct fingerprints. */
+    fun generateBatch(count: Int) {
+        viewModelScope.launch {
+            var created = 0
+            val takenHashes = mutableSetOf<String>()
+            repeat(count) {
+                val identity = generateUniqueIdentity(takenHashes) ?: return@repeat
+                val profile = ProfileEntity(
+                    name = ADJECTIVES.random() + " " + ANIMALS.random(),
+                    tagColor = TAG_COLORS.random(),
+                    userAgent = identity.userAgent,
+                    screenW = identity.screenW,
+                    screenH = identity.screenH,
+                    devicePixelRatio = identity.devicePixelRatio,
+                    deviceName = identity.deviceName,
+                    fingerprintHash = identity.fingerprintHash,
+                    canvasNoise = true,
+                    audioNoise = true,
+                    timezoneId = "UTC",
+                    localeTag = "en-US"
+                )
+                repo.saveProfile(profile)
+                takenHashes.add(identity.fingerprintHash)
+                created++
+            }
+            lastBatchCreated.value = created
+        }
+    }
+
+    /**
+     * A brand new random profile. Its fingerprint (if any) is finalized by
+     * the editor's "Generate fingerprint" action, which enforces uniqueness.
+     */
     fun newRandomProfile(): ProfileEntity = ProfileEntity(
         id = java.util.UUID.randomUUID().toString(),
         name = ADJECTIVES.random() + " " + ANIMALS.random(),
@@ -86,26 +169,36 @@ class ProfileViewModel @Inject constructor(
         localeTag = "en-US"
     )
 
+    // -------------------------------------------------------- import/export
+
     fun importJson(json: String) {
         viewModelScope.launch { repo.importProfile(json) }
     }
 
     suspend fun exportJson(id: String): String? = repo.exportProfile(id)
 
-    companion object {
-        private val ADJECTIVES = listOf(
-            "Silent", "Crimson", "Velvet", "Iron", "Shadow", "Frost",
-            "Neon", "Obsidian", "Azure", "Swift", "Hollow", "Radiant"
-        )
+    // ------------------------------------------------------- bookmarks
 
-        private val ANIMALS = listOf(
-            "Fox", "Raven", "Wolf", "Panther", "Lynx", "Viper",
-            "Heron", "Otter", "Jackal", "Falcon", "Moth", "Badger"
-        )
+    fun observeBookmarks(profileId: String): Flow<List<BookmarkEntity>> =
+        repo.observeBookmarks(profileId)
 
-        private val TAG_COLORS = listOf(
-            "0xFF6366F1", "0xFF22C55E", "0xFFEF4444", "0xFFF59E0B",
-            "0xFF06B6D4", "0xFFEC4899", "0xFF8B5CF6", "0xFF14B8A6"
-        )
+    fun toggleBookmark(profileId: String, url: String, title: String?) {
+        viewModelScope.launch { repo.toggleBookmark(profileId, url, title) }
+    }
+
+    fun isBookmarked(profileId: String, url: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch { onResult(repo.isBookmarked(profileId, url)) }
+    }
+
+    fun deleteBookmark(bookmark: BookmarkEntity) {
+        viewModelScope.launch { repo.deleteBookmark(bookmark) }
+    }
+
+    // -------------------------------------------------------- history
+
+    fun observeHistory(profileId: String) = repo.observeHistory(profileId)
+
+    fun clearHistory(profileId: String) {
+        viewModelScope.launch { repo.clearHistory(profileId) }
     }
 }

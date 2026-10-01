@@ -39,6 +39,9 @@ interface ProfileDao {
         deleteById(profileId)
     }
 
+    @Query("SELECT fingerprint_hash FROM profiles")
+    suspend fun allFingerprintHashes(): List<String?>
+
     @Query(
         """
         SELECT * FROM proxy_test_results

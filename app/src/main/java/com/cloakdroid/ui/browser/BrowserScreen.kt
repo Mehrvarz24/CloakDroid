@@ -2,6 +2,9 @@ package com.cloakdroid.ui.browser
 
 import com.cloakdroid.ui.theme.parseTagColor
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,8 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -28,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -42,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -69,10 +79,21 @@ fun BrowserScreen(
     var session by remember { mutableStateOf<GeckoSession?>(null) }
     var urlInput by remember { mutableStateOf(DEFAULT_START_URL) }
     var showProfileSheet by remember { mutableStateOf(false) }
+    var showBookmarkSheet by remember { mutableStateOf(false) }
+    var showHistorySheet by remember { mutableStateOf(false) }
 
+    val bookmarks by viewModel.observeBookmarks(profileId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val history by viewModel.observeHistory(profileId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // Prefer the live engine URL for page-scoped actions (star, sheets).
     val currentUrl by sessionManager.currentUrl.collectAsStateWithLifecycle(initialValue = null)
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val profile = profiles.find { it.id == profileId }
+
+    // Prefer the live engine URL for page-scoped actions.
+    val pageUrl = currentUrl ?: DEFAULT_START_URL
 
     val proxyType = profile?.proxyType ?: "Direct"
     val tagColor: androidx.compose.ui.graphics.Color = if (profile?.tagColor != null) {
@@ -141,6 +162,35 @@ fun BrowserScreen(
                     }
                 }
             )
+
+            // Bookmark star: filled when the current page is saved.
+            val bookmarked = bookmarks.any { it.url == pageUrl }
+            IconButton(
+                onClick = {
+                    val url = pageUrl.takeIf { it.isNotBlank() } ?: return@IconButton
+                    viewModel.toggleBookmark(
+                        profileId = profileId,
+                        url = url,
+                        title = null
+                    )
+                },
+                enabled = !pageUrl.isBlank() && pageUrl != "about:blank"
+            ) {
+                Icon(
+                    imageVector = if (bookmarked) Icons.Filled.Star else Icons.Outlined.Star,
+                    contentDescription = if (bookmarked) "Remove bookmark" else "Add bookmark",
+                    tint = if (bookmarked) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            IconButton(onClick = { showBookmarkSheet = true }) {
+                Icon(Icons.Outlined.List, contentDescription = "Bookmarks")
+            }
+
+            IconButton(onClick = { showHistorySheet = true }) {
+                Icon(Icons.Default.Refresh, contentDescription = "History")
+            }
 
             IconButton(
                 onClick = {
@@ -276,6 +326,156 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Wipe Session Data")
+                }
+            }
+        }
+    }
+
+    if (showBookmarkSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showBookmarkSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Bookmarks", style = MaterialTheme.typography.titleLarge)
+                HorizontalDivider()
+
+                if (bookmarks.isEmpty()) {
+                    Text(
+                        "No bookmarks yet. Tap the star to save the current page.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(bookmarks, key = { it.id }) { bookmark ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showBookmarkSheet = false
+                                        sessionManager.loadUrl(bookmark.url)
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = bookmark.title,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = bookmark.url,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.deleteBookmark(bookmark) }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete bookmark",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showHistorySheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showHistorySheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "History",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { viewModel.clearHistory(profileId) }) {
+                        Text(
+                            "Clear history",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                HorizontalDivider()
+
+                if (history.isEmpty()) {
+                    Text(
+                        "No browsing history for this profile.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(history, key = { it.id }) { entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHistorySheet = false
+                                        sessionManager.loadUrl(entry.url)
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = entry.title ?: entry.url,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = entry.url,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text(
+                                    text = java.text.DateFormat.getDateTimeInstance(
+                                        java.text.DateFormat.SHORT,
+                                        java.text.DateFormat.SHORT
+                                    ).format(java.util.Date(entry.visitedAt)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

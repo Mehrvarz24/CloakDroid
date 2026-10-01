@@ -1,6 +1,17 @@
 package com.cloakdroid.ui.profiles
 
+import com.cloakdroid.data.local.ProfileEntity
+import com.cloakdroid.ui.theme.CloakColors
 import com.cloakdroid.ui.theme.parseTagColor
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +35,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,12 +63,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+import kotlinx.coroutines.launch
 
 private enum class ProfileFilter(val label: String) {
     ALL("All"),
@@ -73,10 +97,26 @@ fun ProfileListScreen(
 ) {
     val profiles by viewModel.profiles.collectAsState()
 
+    // Ambient glow: 20s cycle, 0 -> 1 -> 0.
+    val ambientTransition = rememberInfiniteTransition(label = "ambientGlow")
+    val ambientPhase by ambientTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 10000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "ambientPhase"
+    )
+
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(ProfileFilter.ALL) }
     var menuForId by remember { mutableStateOf<String?>(null) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    var showBatchDialog by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val visibleProfiles = remember(profiles, query, filter) {
         val trimmed = query.trim()
@@ -124,8 +164,68 @@ fun ProfileListScreen(
         )
     }
 
+    if (showBatchDialog) {
+        var batchCount by remember { mutableStateOf("5") }
+        AlertDialog(
+            onDismissRequest = { showBatchDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            title = { Text("Generate profiles") },
+            text = {
+                Column {
+                    Text("How many unique profiles should be generated? Each gets its own unique fingerprint.")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = batchCount,
+                        onValueChange = { batchCount = it.filter { c -> c.isDigit() } },
+                        label = { Text("Count (1-50)") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val n = batchCount.toIntOrNull()?.coerceIn(1, 50) ?: 0
+                        if (n > 0) viewModel.generateBatch(n)
+                        showBatchDialog = false
+                    }
+                ) {
+                    Text("Generate")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
-        modifier = modifier.background(com.cloakdroid.ui.theme.CloakBrushes.background),
+        modifier = modifier
+            .background(com.cloakdroid.ui.theme.CloakBrushes.background)
+            .drawBehind {
+                // Ambient: very slow-moving large radial indigo glow behind content.
+                val phase = ambientPhase
+                val cx = size.width * (0.7f - 0.4f * phase)
+                val cy = size.height * (0.65f - 0.25f * phase)
+                val radius = size.maxDimension * 0.9f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            CloakColors.Primary.copy(alpha = 0.10f),
+                            Color(0xFF8B5CF6).copy(alpha = 0.04f),
+                            Color.Transparent
+                        ),
+                        center = Offset(cx, cy),
+                        radius = radius
+                    ),
+                    radius = radius,
+                    center = Offset(cx, cy)
+                )
+            },
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             Surface(
@@ -140,35 +240,97 @@ fun ProfileListScreen(
                 ) {
                     com.cloakdroid.ui.theme.CloakUI.MetallicHeadline(text = "CloakDroid")
                     Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = {
-                            Text(
-                                "Search profiles",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            placeholder = {
+                                Text(
+                                    "Search profiles",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                cursorColor = MaterialTheme.colorScheme.primary
                             )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            cursorColor = MaterialTheme.colorScheme.primary
                         )
-                    )
+
+                        // Overflow menu: import from clipboard + batch generate.
+                        var topMenuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { topMenuExpanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "More options",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = topMenuExpanded,
+                                onDismissRequest = { topMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Import from clipboard",
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = {
+                                        topMenuExpanded = false
+                                        val raw = clipboard.getText()?.text.orEmpty()
+                                        if (raw.isNotBlank()) {
+                                            viewModel.importJson(raw)
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Profile imported from clipboard",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Clipboard is empty",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Generate N profiles…",
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = {
+                                        topMenuExpanded = false
+                                        showBatchDialog = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
         },
@@ -221,19 +383,7 @@ fun ProfileListScreen(
             }
 
             if (visibleProfiles.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (query.isBlank()) "No profiles yet. Tap New Profile to create one."
-                        else "No profiles match \"$query\".",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                EmptyState(queryText = query)
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -246,146 +396,307 @@ fun ProfileListScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(visibleProfiles, key = { it.id }) { profile ->
-                        val isDirect =
-                            profile.proxyType.toString().equals("DIRECT", ignoreCase = true)
-                        val badgeLabel = profile.proxyType.toString().uppercase()
-                        val badgeContainerColor =
-                            if (isDirect) MaterialTheme.colorScheme.tertiaryContainer
-                            else MaterialTheme.colorScheme.primaryContainer
-                        val badgeContentColor =
-                            if (isDirect) MaterialTheme.colorScheme.onTertiaryContainer
-                            else MaterialTheme.colorScheme.onPrimaryContainer
-
-                        ElevatedCard(
-                            onClick = { onEdit(profile.id) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .border(
-                                    1.dp,
-                                    com.cloakdroid.ui.theme.CloakColors.GlassBorder,
-                                    MaterialTheme.shapes.medium
-                                ),
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            elevation = CardDefaults.elevatedCardElevation(
-                                defaultElevation = 0.dp
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clip(CircleShape)
-                                        .background(parseTagColor(profile.tagColor))
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = profile.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Surface(
-                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
-                                        color = badgeContainerColor,
-                                        contentColor = badgeContentColor
-                                    ) {
-                                        Text(
-                                            text = badgeLabel,
-                                            style = MaterialTheme.typography.labelSmall,
-                                        color = badgeContentColor,
-                                            modifier = Modifier.padding(
-                                                horizontal = 8.dp,
-                                                vertical = 3.dp
-                                            )
-                                        )
+                        val index = visibleProfiles.indexOf(profile)
+                        ProfileCard(
+                            profile = profile,
+                            index = index,
+                            badgeLabel = profile.proxyType.toString().uppercase(),
+                            badgeContainerColor = if (profile.proxyType.toString()
+                                    .equals("DIRECT", ignoreCase = true)
+                            ) MaterialTheme.colorScheme.tertiaryContainer
+                            else MaterialTheme.colorScheme.primaryContainer,
+                            badgeContentColor = if (profile.proxyType.toString()
+                                    .equals("DIRECT", ignoreCase = true)
+                            ) MaterialTheme.colorScheme.onTertiaryContainer
+                            else MaterialTheme.colorScheme.onPrimaryContainer,
+                            onEdit = { onEdit(profile.id) },
+                            onLaunch = { onLaunch(profile.id) },
+                            onMenuToggle = {
+                                menuForId =
+                                    if (menuForId == profile.id) null else profile.id
+                            },
+                            menuExpanded = menuForId == profile.id,
+                            onMenuDismiss = { menuForId = null },
+                            onClone = {
+                                viewModel.clone(profile.id)
+                                menuForId = null
+                            },
+                            onClearCache = {
+                                viewModel.clearCache(profile.id)
+                                menuForId = null
+                            },
+                            onExport = {
+                                menuForId = null
+                                scope.launch {
+                                    val json = viewModel.exportJson(profile.id)
+                                    if (json != null) {
+                                        clipboard.setText(AnnotatedString(json))
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "Profile JSON copied to clipboard",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
                                     }
                                 }
-
-                                FilledTonalButton(
-                                    onClick = { onLaunch(profile.id) },
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                ) {
-                                    Text("Launch")
-                                }
-
-                                Spacer(modifier = Modifier.width(4.dp))
-
-                                IconButton(onClick = {
-                                    menuForId =
-                                        if (menuForId == profile.id) null else profile.id
-                                }) {
-                                    Icon(
-                                        imageVector = Icons.Default.MoreVert,
-                                        contentDescription = "More actions",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            onShare = {
+                                menuForId = null
+                                scope.launch {
+                                    val json = viewModel.exportJson(profile.id)
+                                        ?: return@launch
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_SEND
+                                    ).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_TEXT, json)
+                                    }
+                                    context.startActivity(
+                                        android.content.Intent.createChooser(intent, "Share profile")
                                     )
                                 }
-
-                                DropdownMenu(
-                                    expanded = menuForId == profile.id,
-                                    onDismissRequest = { menuForId = null }
-                                ) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "Clone",
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                        },
-                                        onClick = {
-                                            viewModel.clone(profile.id)
-                                            menuForId = null
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "Clear Cache",
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                        },
-                                        onClick = {
-                                            viewModel.clearCache(profile.id)
-                                            menuForId = null
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "Delete",
-                                                color = MaterialTheme.colorScheme.error
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Default.Delete,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                        },
-                                        onClick = {
-                                            pendingDeleteId = profile.id
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                            },
+                            onDelete = { pendingDeleteId = profile.id }
+                        )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Single profile card: staggered slide-up + fade entrance on first composition
+ * and a spring press-scale (0.97) while the user holds it down.
+ */
+@Composable
+private fun ProfileCard(
+    profile: ProfileEntity,
+    index: Int,
+    badgeLabel: String,
+    badgeContainerColor: Color,
+    badgeContentColor: Color,
+    onEdit: () -> Unit,
+    onLaunch: () -> Unit,
+    onMenuToggle: () -> Unit,
+    menuExpanded: Boolean,
+    onMenuDismiss: () -> Unit,
+    onClone: () -> Unit,
+    onExport: () -> Unit,
+    onShare: () -> Unit,
+    onClearCache: () -> Unit,
+    onDelete: () -> Unit
+) {
+    // Staggered entrance: slide up from 48dp + fade in, 40ms delay per index.
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(index * 40L)
+        appeared = true
+    }
+    val entranceProgress by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(durationMillis = 320),
+        label = "cardEntrance"
+    )
+
+    // Press scale, driven by the card's real interaction source.
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.97f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "cardPress"
+    )
+
+    ElevatedCard(
+        onClick = {
+            onEdit()
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = entranceProgress
+                translationY = (1f - entranceProgress) * 48.dp.toPx()
+                scaleX = pressScale
+                scaleY = pressScale
+            },
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 0.dp
+        ),
+        interactionSource = interactionSource
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(parseTagColor(profile.tagColor))
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = profile.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+                    color = badgeContainerColor,
+                    contentColor = badgeContentColor
+                ) {
+                    Text(
+                        text = badgeLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = badgeContentColor,
+                        modifier = Modifier.padding(
+                            horizontal = 8.dp,
+                            vertical = 3.dp
+                        )
+                    )
+                }
+            }
+
+            FilledTonalButton(
+                onClick = onLaunch,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) {
+                Text("Launch")
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            IconButton(onClick = onMenuToggle) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More actions",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = onMenuDismiss
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Clone", color = MaterialTheme.colorScheme.onSurface) },
+                    onClick = onClone
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text("Export (copy JSON)", color = MaterialTheme.colorScheme.onSurface)
+                    },
+                    onClick = onExport
+                )
+                DropdownMenuItem(
+                    text = { Text("Share…", color = MaterialTheme.colorScheme.onSurface) },
+                    onClick = onShare
+                )
+                DropdownMenuItem(
+                    text = { Text("Clear Cache", color = MaterialTheme.colorScheme.onSurface) },
+                    onClick = onClearCache
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    },
+                    onClick = onDelete
+                )
+            }
+        }
+    }
+}
+
+/** Empty-state card with a pulsing shield glyph. */
+@Composable
+private fun EmptyState(queryText: String) {
+    val isFiltering = queryText.isNotBlank()
+    val transition = rememberInfiniteTransition(label = "emptyPulse")
+    val pulse by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "emptyPulseScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    CloakColors.GlassBorder,
+                    MaterialTheme.shapes.medium
+                ),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 36.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .graphicsLayer {
+                            scaleX = pulse
+                            scaleY = pulse
+                        }
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = if (isFiltering) "No profiles match \"$queryText\"."
+                    else "No profiles yet — create your first identity",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                if (!isFiltering) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Tap \"+ New Profile\" to get started.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
             }
         }

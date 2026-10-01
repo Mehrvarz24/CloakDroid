@@ -1,6 +1,11 @@
 package com.cloakdroid.data.repository
 
 import android.content.Context
+import com.cloakdroid.data.local.AppDatabase
+import com.cloakdroid.data.local.BookmarkDao
+import com.cloakdroid.data.local.BookmarkEntity
+import com.cloakdroid.data.local.HistoryDao
+import com.cloakdroid.data.local.HistoryEntity
 import com.cloakdroid.data.local.ProfileDao
 import com.cloakdroid.data.local.ProfileEntity
 import com.cloakdroid.data.local.ProxyTestResultEntity
@@ -35,6 +40,12 @@ data class ProfileTransfer(
     val spoofLat: Double? = null,
     val spoofLon: Double? = null,
     val webrtcEnabled: Boolean = true,
+    val webrtcPolicy: String = "DISABLED",
+    val screenW: Int? = null,
+    val screenH: Int? = null,
+    val devicePixelRatio: Float? = null,
+    val deviceName: String? = null,
+    val fingerprintHash: String? = null,
     val canvasNoise: Boolean = true,
     val audioNoise: Boolean = true,
     val timezoneId: String = "UTC",
@@ -46,6 +57,9 @@ data class ProfileTransfer(
 @Singleton
 class ProfileRepository @Inject constructor(
     private val dao: ProfileDao,
+    private val bookmarkDao: BookmarkDao,
+    private val historyDao: HistoryDao,
+    private val database: AppDatabase,
     private val proxyTester: ProxyTester,
     @ApplicationContext private val context: Context
 ) {
@@ -167,6 +181,12 @@ class ProfileRepository @Inject constructor(
             spoofLat = profile.spoofLat,
             spoofLon = profile.spoofLon,
             webrtcEnabled = profile.webrtcEnabled,
+            webrtcPolicy = profile.webrtcPolicy,
+            screenW = profile.screenW,
+            screenH = profile.screenH,
+            devicePixelRatio = profile.devicePixelRatio,
+            deviceName = profile.deviceName,
+            fingerprintHash = profile.fingerprintHash,
             canvasNoise = profile.canvasNoise,
             audioNoise = profile.audioNoise,
             timezoneId = profile.timezoneId,
@@ -195,6 +215,12 @@ class ProfileRepository @Inject constructor(
                 spoofLat = transfer.spoofLat,
                 spoofLon = transfer.spoofLon,
                 webrtcEnabled = transfer.webrtcEnabled,
+                webrtcPolicy = transfer.webrtcPolicy,
+                screenW = transfer.screenW,
+                screenH = transfer.screenH,
+                devicePixelRatio = transfer.devicePixelRatio,
+                deviceName = transfer.deviceName,
+                fingerprintHash = transfer.fingerprintHash,
                 canvasNoise = transfer.canvasNoise,
                 audioNoise = transfer.audioNoise,
                 timezoneId = transfer.timezoneId,
@@ -232,4 +258,68 @@ class ProfileRepository @Inject constructor(
             }
         }
     }
+
+    // ------------------------------------------------------------ bookmarks
+
+    fun observeBookmarks(profileId: String): Flow<List<BookmarkEntity>> =
+        bookmarkDao.observeFor(profileId)
+
+    /** Toggles the bookmark for [url]; returns `true` when now bookmarked. */
+    suspend fun toggleBookmark(profileId: String, url: String, title: String?): Boolean {
+        return if (bookmarkDao.existsFor(profileId, url)) {
+            bookmarkDao.deleteFor(profileId, url)
+            false
+        } else {
+            bookmarkDao.insert(
+                BookmarkEntity(
+                    profileId = profileId,
+                    title = title?.takeIf { it.isNotBlank() } ?: url,
+                    url = url
+                )
+            )
+            true
+        }
+    }
+
+    suspend fun isBookmarked(profileId: String, url: String): Boolean =
+        bookmarkDao.existsFor(profileId, url)
+
+    suspend fun deleteBookmark(bookmark: BookmarkEntity) {
+        bookmarkDao.deleteFor(bookmark.profileId, bookmark.url)
+    }
+
+    // -------------------------------------------------------------- history
+
+    fun observeHistory(profileId: String): Flow<List<HistoryEntity>> =
+        historyDao.observeFor(profileId)
+
+    /** Records a visited page. Inline no-op safe (never throws). */
+    suspend fun recordVisit(profileId: String, url: String, title: String?) {
+        if (profileId.isBlank() || url.isBlank()) return
+        try {
+            historyDao.insert(
+                HistoryEntity(
+                    profileId = profileId,
+                    url = url,
+                    title = title?.takeIf { it.isNotBlank() }
+                )
+            )
+        } catch (_: Throwable) {
+            // History recording must never break browsing.
+        }
+    }
+
+    suspend fun clearHistory(profileId: String) {
+        historyDao.deleteAllFor(profileId)
+    }
+
+    // ------------------------------------------------- fingerprint uniqueness
+
+    /**
+     * All fingerprint hashes currently stored on profiles. Used by
+     * [FingerprintGenerator] consumers to guarantee no two profiles ever
+     * share the same fingerprint.
+     */
+    suspend fun existingFingerprintHashes(): Set<String> =
+        dao.allFingerprintHashes().filterNotNull().toSet()
 }

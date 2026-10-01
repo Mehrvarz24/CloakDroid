@@ -6,6 +6,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoSession
 
 /**
@@ -20,6 +21,8 @@ import org.mozilla.geckoview.GeckoSession
 @Singleton
 class GeckoSessionManager @Inject constructor(
     private val engine: BrowserEngine,
+    private val repository: com.cloakdroid.data.repository.ProfileRepository,
+    @com.cloakdroid.di.IoScope private val ioScope: kotlinx.coroutines.CoroutineScope
 ) {
     companion object {
         private const val TAG = "CloakDroidSessions"
@@ -73,9 +76,45 @@ class GeckoSessionManager @Inject constructor(
         _currentSession.value = session
         _currentUrl.value = url
         currentProfileId = profileId
+        attachHistoryRecorder(session, profileId)
         Log.i(TAG, "launch profile=$profileId url=$url")
         session
     }
+
+    /**
+     * Records every successfully loaded page of [session] into the
+     * per-profile history. The delegate registered here intentionally
+     * replaces the engine's logging delegate; the log lines it drops are
+     * duplicated below.
+     */
+    private fun attachHistoryRecorder(session: GeckoSession, profileId: String) {
+        try {
+            session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
+                override fun onPageStart(s: GeckoSession, url: String) {
+                    Log.d(TAG, "pageStart [${System.identityHashCode(s)}] url=$url")
+                }
+
+                override fun onPageStop(s: GeckoSession, success: Boolean) {
+                    Log.d(TAG, "pageStop [${System.identityHashCode(s)}] success=$success")
+                    if (!success) return
+                    val visitedUrl = _currentUrl.value
+                    if (visitedUrl.isBlank() || visitedUrl == BLANK_URL) return
+                    ioScope.launch {
+                        repository.recordVisit(
+                            profileId = profileId,
+                            url = visitedUrl,
+                            title = visitedUrl.toUri().host?.ifBlank { visitedUrl }
+                                ?: visitedUrl
+                        )
+                    }
+                }
+            })
+        } catch (t: Throwable) {
+            Log.w(TAG, "failed to attach history recorder", t)
+        }
+    }
+
+    private fun String.toUri(): android.net.Uri = android.net.Uri.parse(this)
 
     /**
      * Navigates the current session to [url]. No-op (with a warning) when no

@@ -30,6 +30,11 @@ object ScriptInjector {
      * @param audioNoiseEnabled perturb AudioBuffer.getChannelData
      * @param canvasNoiseEnabled perturb canvas readbacks
      * @param webrtcEnabled when false RTCPeerConnection is removed entirely
+     * @param webrtcPolicy DISABLED | PROXY_ONLY | FULL (see WebRtcPolicy)
+     * @param screenW spoofed window.screen.width in CSS px (0 = leave untouched)
+     * @param screenH spoofed window.screen.height in CSS px (0 = leave untouched)
+     * @param devicePixelRatio spoofed devicePixelRatio (0 = leave untouched)
+     * @param deviceName value exposed via navigator.userAgentData hints
      */
     data class SpoofConfig(
         val lat: Double,
@@ -43,7 +48,13 @@ object ScriptInjector {
         val canvasSeed: Long = 0x5EEDL,
         val audioNoiseEnabled: Boolean = true,
         val canvasNoiseEnabled: Boolean = true,
-        val webrtcEnabled: Boolean = false
+        val webrtcEnabled: Boolean = false,
+        /** One of WebRtcPolicy names: DISABLED | PROXY_ONLY | FULL */
+        val webrtcPolicy: String = "DISABLED",
+        val screenW: Int = 0,
+        val screenH: Int = 0,
+        val devicePixelRatio: Float = 0f,
+        val deviceName: String = ""
     )
 
     /**
@@ -76,7 +87,15 @@ object ScriptInjector {
         sb.append("\"canvasSeed\":").append(c.canvasSeed).append(',')
         sb.append("\"audioNoiseEnabled\":").append(c.audioNoiseEnabled).append(',')
         sb.append("\"canvasNoiseEnabled\":").append(c.canvasNoiseEnabled).append(',')
-        sb.append("\"webrtcEnabled\":").append(c.webrtcEnabled)
+        sb.append("\"webrtcEnabled\":").append(c.webrtcEnabled).append(',')
+        sb.append("\"webrtcPolicy\":").append(str(c.webrtcPolicy)).append(',')
+        sb.append("\"screenW\":").append(c.screenW).append(',')
+        sb.append("\"screenH\":").append(c.screenH).append(',')
+        sb.append("\"devicePixelRatio\":").append(
+            if (c.devicePixelRatio.isNaN() || c.devicePixelRatio <= 0f) "0"
+            else String.format(Locale.US, "%.3f", c.devicePixelRatio)
+        ).append(',')
+        sb.append("\"deviceName\":").append(str(c.deviceName))
         sb.append('}')
         return sb.toString()
     }
@@ -445,9 +464,92 @@ object ScriptInjector {
     };
   }
 
+  /* --------------------------------------------------------------- screen */
+
+  if (hasWin) {
+    var sw = CFG.screenW | 0;
+    var sh = CFG.screenH | 0;
+    var dpr = Number(CFG.devicePixelRatio) || 0;
+
+    if (typeof Screen !== 'undefined') {
+      if (sw > 0) {
+        defineGetter(Screen.prototype, 'width', sw);
+        defineGetter(Screen.prototype, 'availWidth', sw);
+      }
+      if (sh > 0) {
+        defineGetter(Screen.prototype, 'height', sh);
+        defineGetter(Screen.prototype, 'availHeight', sh);
+      }
+    }
+    if (dpr > 0) {
+      defineGetter(window, 'devicePixelRatio', dpr);
+    }
+  }
+
+  /* -------------------------------------------- userAgentData / deviceName */
+
+  if (hasNav && CFG.deviceName) {
+    var deviceName = String(CFG.deviceName);
+    // Gecko has no navigator.userAgentData; expose a best-effort hints object
+    // so page scripts probing for it see a consistent identity instead of an
+    // undefined property inconsistent with the spoofed UA.
+    var fakeUAD = {
+      brands: Object.freeze([
+        Object.freeze({ brand: 'Not.A/Brand', version: '99' }),
+        Object.freeze({ brand: 'Chromium', version: '124' }),
+        Object.freeze({ brand: 'Chrome', version: '124' })
+      ]),
+      mobile: /Mobi|Android|iPhone/.test(String(navigator.userAgent)),
+      platform: deviceName.indexOf('Windows') === 0 ? 'Windows'
+              : (deviceName.indexOf('Mac') === 0 ? 'macOS'
+              : (deviceName.indexOf('Linux') === 0 ? 'Linux' : 'Android')),
+      getHighEntropyValues: function (hints) {
+        var self = this;
+        return Promise.resolve().then(function () {
+          var out = {
+            architecture: self.platform === 'Windows' || self.platform === 'Linux' ? 'x86' : 'arm',
+            bitness: '64',
+            model: self.platform === 'Android' ? deviceName : '',
+            platformVersion: '10.0.0',
+            uaFullVersion: '124.0.0.0',
+            fullVersionList: Object.freeze([
+              Object.freeze({ brand: 'Not.A/Brand', version: '99.0.0.0' }),
+              Object.freeze({ brand: 'Chromium', version: '124.0.0.0' }),
+              Object.freeze({ brand: 'Chrome', version: '124.0.0.0' })
+            ])
+          };
+          var picked = {};
+          try {
+            hints = Object.freeze(Array.prototype.slice.call(hints || []));
+          } catch (e) { hints = []; }
+          for (var h = 0; h < hints.length; h++) {
+            if (Object.prototype.hasOwnProperty.call(out, hints[h])) {
+              picked[hints[h]] = out[hints[h]];
+            }
+          }
+          picked.mobile = self.mobile;
+          picked.platform = self.platform;
+          return picked;
+        });
+      },
+      toJSON: function () {
+        return { brands: this.brands, mobile: this.mobile, platform: this.platform };
+      }
+    };
+    try {
+      Object.defineProperty(Navigator.prototype, 'userAgentData', {
+        get: function () { return fakeUAD; },
+        configurable: true,
+        enumerable: true
+      });
+    } catch (eUad) { /* ignore */ }
+  }
+
   /* --------------------------------------------------------------- webrtc */
 
-  if (!CFG.webrtcEnabled && hasWin) {
+  var rtcPolicy = String(CFG.webrtcPolicy || (CFG.webrtcEnabled ? 'FULL' : 'DISABLED')).toUpperCase();
+
+  if (rtcPolicy === 'DISABLED' && hasWin) {
     var disabled = function RTCPeerConnection() {
       var err = new Error('RTCPeerConnection is disabled by CloakDroid');
       err.name = 'NotSupportedError';
@@ -475,6 +577,53 @@ object ScriptInjector {
     try {
       Object.defineProperty(window, 'RTCDataChannel', { get: function () { return undefined; } });
     } catch (e3) { /* ignore */ }
+  } else if (rtcPolicy === 'PROXY_ONLY' && hasWin) {
+    // Keep WebRTC usable, but scrub every host candidate so the local / real
+    // IP can never be enumerated by page scripts; only srflx / relay
+    // candidates reflecting the proxy egress survive.
+    var sanitizeCandidates = function (list) {
+      var out = [];
+      try {
+        for (var i = 0; i < list.length; i++) {
+          var cand = String(list[i] || '');
+          if (cand.indexOf('typ host') !== -1) { continue; }
+          if (/(^|\s)(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|127\.|::1|fc|fd)/i.test(cand)) {
+            continue;
+          }
+          out.push(cand);
+        }
+      } catch (e) { /* ignore */ }
+      return out;
+    };
+
+    var patchIce = function (Proto) {
+      if (!Proto || typeof Proto.prototype.addIceCandidate !== 'function') { return; }
+      var origSetLocal = Proto.prototype.setLocalDescription;
+      if (typeof origSetLocal === 'function') {
+        Proto.prototype.setLocalDescription = function (desc) {
+          try {
+            if (desc && desc.sdp) {
+              var lines = String(desc.sdp).split(/(?:\r\n|\r|\n)/);
+              var kept = sanitizeCandidates(lines);
+              var munged = kept.join('\r\n');
+              for (var l = 0; l < lines.length; l++) {
+                if (lines[l].indexOf('a=') === 0 &&
+                    lines[l].indexOf('a=candidate:') !== 0 &&
+                    lines[l].indexOf('a=end-of-candidates') !== 0) {
+                  munged += '\r\n' + lines[l];
+                }
+              }
+              desc = Object.assign({}, desc, { sdp: munged });
+            }
+          } catch (e) { /* ignore */ }
+          return origSetLocal.call(this, desc);
+        };
+      }
+    };
+
+    try { patchIce(window.RTCPeerConnection); } catch (ePc) { /* ignore */ }
+    try { patchIce(window.webkitRTCPeerConnection); } catch (ePc2) { /* ignore */ }
+    try { patchIce(window.mozRTCPeerConnection); } catch (ePc3) { /* ignore */ }
   }
 
   /* Freeze side-effect free globals so page scripts cannot detect rewrites. */

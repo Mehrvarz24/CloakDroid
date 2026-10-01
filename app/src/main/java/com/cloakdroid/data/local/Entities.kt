@@ -7,6 +7,26 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
+/**
+ * Per-profile WebRTC policy.
+ *
+ * DISABLED  - RTCPeerConnection is removed entirely (strongest, default).
+ * PROXY_ONLY- WebRTC stays functional; a real connection would still use the
+ *             system network, but pages can no longer enumerate local host
+ *             candidates, which is what leaks the real IP behind a proxy.
+ * FULL      - WebRTC is left untouched.
+ */
+enum class WebRtcPolicy {
+    DISABLED,
+    PROXY_ONLY,
+    FULL;
+
+    companion object {
+        fun from(value: String?): WebRtcPolicy =
+            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: DISABLED
+    }
+}
+
 @Entity(tableName = "profiles")
 data class ProfileEntity(
     @PrimaryKey
@@ -49,6 +69,30 @@ data class ProfileEntity(
 
     @ColumnInfo(name = "webrtc_enabled")
     val webrtcEnabled: Boolean = false,
+
+    /**
+     * WebRTC policy: DISABLED (default) removes RTCPeerConnection entirely,
+     * PROXY_ONLY keeps WebRTC but makes public IP leakage practically
+     * impossible, FULL leaves it untouched.
+     */
+    @ColumnInfo(name = "webrtc_policy")
+    val webrtcPolicy: String = WebRtcPolicy.DISABLED.name,
+
+    @ColumnInfo(name = "screen_w")
+    val screenW: Int? = null,
+
+    @ColumnInfo(name = "screen_h")
+    val screenH: Int? = null,
+
+    @ColumnInfo(name = "device_pixel_ratio")
+    val devicePixelRatio: Float? = null,
+
+    @ColumnInfo(name = "device_name")
+    val deviceName: String? = null,
+
+    /** Stable SHA-256 over the identity fields; unique across profiles. */
+    @ColumnInfo(name = "fingerprint_hash")
+    val fingerprintHash: String? = null,
 
     @ColumnInfo(name = "canvas_noise")
     val canvasNoise: Boolean = false,
@@ -112,4 +156,70 @@ data class ProxyTestResultEntity(
 
     @ColumnInfo(name = "tested_at")
     val testedAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "bookmarks",
+    foreignKeys = [
+        ForeignKey(
+            entity = ProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["profile_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["profile_id"]),
+        Index(value = ["profile_id", "created_at"])
+    ]
+)
+data class BookmarkEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String = UUID.randomUUID().toString(),
+
+    @ColumnInfo(name = "profile_id")
+    val profileId: String,
+
+    @ColumnInfo(name = "title")
+    val title: String,
+
+    @ColumnInfo(name = "url")
+    val url: String,
+
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "history",
+    foreignKeys = [
+        ForeignKey(
+            entity = ProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["profile_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["profile_id"]),
+        Index(value = ["profile_id", "visited_at"])
+    ]
+)
+data class HistoryEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String = UUID.randomUUID().toString(),
+
+    @ColumnInfo(name = "profile_id")
+    val profileId: String,
+
+    @ColumnInfo(name = "url")
+    val url: String,
+
+    @ColumnInfo(name = "title")
+    val title: String? = null,
+
+    @ColumnInfo(name = "visited_at")
+    val visitedAt: Long = System.currentTimeMillis(),
 )
