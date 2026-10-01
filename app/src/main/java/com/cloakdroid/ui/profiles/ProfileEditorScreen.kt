@@ -102,6 +102,7 @@ fun ProfileEditorScreen(
 ) {
     val profiles by viewModel.profiles.collectAsState()
     val testResult by viewModel.testResult.collectAsState()
+    val testing by viewModel.testing.collectAsState()
 
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
 
@@ -409,6 +410,14 @@ fun ProfileEditorScreen(
 
                             val result = testResult
                             when {
+                                testing -> {
+                                    Text(
+                                        text = "Testing proxy… this can take a few seconds.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
                                 result == null -> {
                                     Text(
                                         text = "No test run yet.",

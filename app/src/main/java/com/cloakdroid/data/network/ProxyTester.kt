@@ -225,7 +225,7 @@ class ProxyTester @Inject constructor(
                     json.decodeFromString(GeoLookupResponse.serializer(), body)
                 }.getOrElse { return ProxyTestResult.NetworkError("Malformed geo body") }
 
-                if (parsed.status == "fail") {
+                if (!parsed.success) {
                     return ProxyTestResult.NetworkError(parsed.message ?: "Geo lookup failed")
                 }
                 geo = parsed
@@ -250,9 +250,13 @@ class ProxyTester @Inject constructor(
             publicIp = ip,
             countryCode = countryCode,
             city = geo.city?.trim().orEmpty().ifEmpty { "Unknown" },
-            isp = geo.isp?.trim().orEmpty().ifEmpty { geo.org ?: "Unknown" },
-            lat = geo.lat ?: 0.0,
-            lon = geo.lon ?: 0.0,
+            isp = geo.connection?.isp?.trim().orEmpty()
+                .ifEmpty { geo.isp?.trim().orEmpty() }
+                .ifEmpty { geo.connection?.org?.trim().orEmpty() }
+                .ifEmpty { geo.org?.trim().orEmpty() }
+                .ifEmpty { "Unknown" },
+            lat = geo.latitude ?: geo.lat ?: 0.0,
+            lon = geo.longitude ?: geo.lon ?: 0.0,
             suggestedTimezoneId = timezoneId,
             suggestedLocale = locale
         )
@@ -281,21 +285,34 @@ class ProxyTester @Inject constructor(
 
     @Serializable
     data class GeoLookupResponse(
-        val status: String = "success",
+        val success: Boolean = true,
         val message: String? = null,
         val country: String? = null,
-        val countryCode: String? = null,
+        @kotlinx.serialization.SerialName("country_code") val countryCode: String? = null,
         val region: String? = null,
-        val regionName: String? = null,
+        @kotlinx.serialization.SerialName("region_name") val regionName: String? = null,
         val city: String? = null,
-        val zip: String? = null,
+        val postal: String? = null,
+        val latitude: Double? = null,
+        val longitude: Double? = null,
+        val timezone: TimezoneInfo? = null,
+        val connection: ConnectionInfo? = null,
+        // Legacy ip-api.com fields kept for backward compatibility.
         val lat: Double? = null,
         val lon: Double? = null,
-        val timezone: String? = null,
         val isp: String? = null,
         val org: String? = null,
-        val asField: String? = null,
         val query: String? = null
+    )
+
+    @Serializable
+    data class TimezoneInfo(val id: String? = null)
+
+    @Serializable
+    data class ConnectionInfo(
+        val org: String? = null,
+        val isp: String? = null,
+        val domain: String? = null
     )
 
     companion object {
@@ -303,7 +320,9 @@ class ProxyTester @Inject constructor(
         private const val HTTP_PROXY_AUTH_REQUIRED = 407
         private const val USER_AGENT = "CloakDroid/1.0"
         private const val IPIFY_URL = "https://api.ipify.org?format=json"
-        private const val IP_API_URL = "http://ip-api.com/json"
+        // ip-api.com free tier is HTTP-only and the app forbids cleartext
+        // traffic; ipwho.is serves the same fields over HTTPS.
+        private const val IP_API_URL = "https://ipwho.is"
         private const val DEFAULT_TIMEZONE = "UTC"
         private const val DEFAULT_LOCALE = "en-US"
 

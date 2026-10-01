@@ -22,6 +22,7 @@ class ProfileViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val testResult = MutableStateFlow<ProxyTestResult?>(null)
+    val testing = MutableStateFlow(false)
 
     fun save(profile: ProfileEntity) {
         viewModelScope.launch { repo.saveProfile(profile) }
@@ -41,8 +42,13 @@ class ProfileViewModel @Inject constructor(
 
     fun testProxy(profile: ProfileEntity) {
         testResult.value = null
+        testing.value = true
         viewModelScope.launch {
-            testResult.value = repo.testProxyFor(profile)
+            try {
+                testResult.value = repo.testProxyFor(profile)
+            } finally {
+                testing.value = false
+            }
         }
     }
 
