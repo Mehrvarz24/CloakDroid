@@ -1,5 +1,6 @@
 package com.cloakdroid.ui.profiles
 
+import com.cloakdroid.ui.theme.parseTagColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -290,7 +291,7 @@ fun ProfileListScreen(
                                     modifier = Modifier
                                         .size(14.dp)
                                         .clip(CircleShape)
-                                        .background(Color(android.graphics.Color.parseColor(profile.tagColor)))
+                                        .background(parseTagColor(profile.tagColor))
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
 

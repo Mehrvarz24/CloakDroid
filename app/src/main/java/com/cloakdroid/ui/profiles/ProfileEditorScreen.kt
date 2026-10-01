@@ -1,5 +1,6 @@
 package com.cloakdroid.ui.profiles
 
+import com.cloakdroid.ui.theme.parseTagColor
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
@@ -577,7 +578,7 @@ private fun ColorDot(
         modifier = Modifier
             .size(40.dp)
             .clip(CircleShape)
-            .background(Color(android.graphics.Color.parseColor(color)))
+            .background(parseTagColor(color))
             .border(
                 width = if (selected) 3.dp else 1.dp,
                 color = if (selected) MaterialTheme.colorScheme.onSurface

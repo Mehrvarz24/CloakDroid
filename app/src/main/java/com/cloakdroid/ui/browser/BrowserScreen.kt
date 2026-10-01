@@ -1,5 +1,6 @@
 package com.cloakdroid.ui.browser
 
+import com.cloakdroid.ui.theme.parseTagColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,7 +76,7 @@ fun BrowserScreen(
 
     val proxyType = profile?.proxyType ?: "Direct"
     val tagColor: androidx.compose.ui.graphics.Color = if (profile?.tagColor != null) {
-        try { Color(android.graphics.Color.parseColor(profile.tagColor)) } catch (e: Exception) { MaterialTheme.colorScheme.primary }
+        parseTagColor(profile.tagColor, fallback = MaterialTheme.colorScheme.primary)
     } else MaterialTheme.colorScheme.primary
     val profileName = profile?.name ?: "Profile"
 
