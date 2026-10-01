@@ -80,35 +80,19 @@ object CloakUI {
         }
     }
 
-    /** Metallic gradient display headline with a soft brand glow. */
+    /** Large display headline — a single clean text, no duplicated glow layer. */
     @Composable
     fun MetallicHeadline(
         text: String,
         modifier: Modifier = Modifier
     ) {
-        Column(modifier = modifier) {
-            // NOTE: the previous variant rendered the same text twice, the copy
-            // behind with Modifier.blur(22.dp). On several devices (notably
-            // Samsung Exynos, e.g. SM-A725F) RenderEffect-based blur of text
-            // renders as an unreadable smudged strip instead of a glow, so the
-            // glow layer was replaced with a plain translucent shadow.
-            Text(
-                text = text,
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
-                modifier = Modifier.graphicsLayer(alpha = 0.25f)
-            )
-            Text(
-                text = text,
-                style = androidx.compose.ui.text.TextStyle(
-                    brush = Brush.linearGradient(CloakColors.Metallic),
-                    fontSize = MaterialTheme.typography.displaySmall.fontSize,
-                    lineHeight = MaterialTheme.typography.displaySmall.lineHeight,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
-                    letterSpacing = MaterialTheme.typography.displaySmall.letterSpacing
-                )
-            )
-        }
+        Text(
+            text = text,
+            modifier = modifier,
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            color = CloakColors.TextHigh
+        )
     }
 
     @Composable

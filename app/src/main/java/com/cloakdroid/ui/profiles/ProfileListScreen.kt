@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -93,6 +94,7 @@ fun ProfileListScreen(
     viewModel: ProfileViewModel,
     onLaunch: (String) -> Unit,
     onEdit: (String) -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val profiles by viewModel.profiles.collectAsState()
@@ -203,9 +205,30 @@ fun ProfileListScreen(
         )
     }
 
+    val bgBitmap = androidx.compose.runtime.remember { com.cloakdroid.ui.settings.ThemeController.backgroundBitmap() }
     Scaffold(
         modifier = modifier
             .background(com.cloakdroid.ui.theme.CloakBrushes.background)
+            .then(
+                if (bgBitmap != null) {
+                    Modifier.drawBehind {
+                        // Custom background image, drawn dimmed behind content.
+                        val iw = bgBitmap.width.toFloat()
+                        val ih = bgBitmap.height.toFloat()
+                        val scale = maxOf(size.width / iw, size.height / ih)
+                        val dw = iw * scale
+                        val dh = ih * scale
+                        val left = (size.width - dw) / 2f
+                        val top = (size.height - dh) / 2f
+                        drawImage(
+                            image = bgBitmap,
+                            dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
+                            dstSize = androidx.compose.ui.unit.IntSize(dw.toInt(), dh.toInt()),
+                            alpha = 0.22f
+                        )
+                    }
+                } else Modifier
+            )
             .drawBehind {
                 // Ambient: very slow-moving large radial indigo glow behind content.
                 val phase = ambientPhase
@@ -216,7 +239,7 @@ fun ProfileListScreen(
                     brush = Brush.radialGradient(
                         colors = listOf(
                             CloakColors.Primary.copy(alpha = 0.10f),
-                            Color(0xFF8B5CF6).copy(alpha = 0.04f),
+                            CloakColors.Secondary.copy(alpha = 0.04f),
                             Color.Transparent
                         ),
                         center = Offset(cx, cy),
@@ -274,6 +297,14 @@ fun ProfileListScreen(
                                 cursorColor = MaterialTheme.colorScheme.primary
                             )
                         )
+
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
 
                         // Overflow menu: import from clipboard + batch generate.
                         var topMenuExpanded by remember { mutableStateOf(false) }

@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.Color
  * brand primary on any failure. Accepts both `0xFF6366F1` (the format used by
  * ProfileViewModel.TAG_COLORS) and `#6366F1` / `#FF6366F1` formats.
  */
-fun parseTagColor(raw: String?, fallback: Color = Color(0xFF6366F1)): Color {
+fun parseTagColor(raw: String?, fallback: Color = Color(0xFFD9A05B)): Color {
     val s = raw?.trim().takeUnless { it.isNullOrEmpty() } ?: return fallback
     return try {
         when {

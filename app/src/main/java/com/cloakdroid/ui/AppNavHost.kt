@@ -18,6 +18,7 @@ import com.cloakdroid.ui.browser.BrowserScreen
 import com.cloakdroid.ui.profiles.ProfileEditorScreen
 import com.cloakdroid.ui.profiles.ProfileListScreen
 import com.cloakdroid.ui.profiles.ProfileViewModel
+import com.cloakdroid.ui.settings.SettingsScreen
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.components.ActivityComponent
 
@@ -63,8 +64,12 @@ fun AppNavHost() {
             ProfileListScreen(
                 viewModel = viewModel,
                 onLaunch = { id -> navController.navigate("browser/$id") },
-                onEdit = { id -> navController.navigate("editor/$id") }
+                onEdit = { id -> navController.navigate("editor/$id") },
+                onOpenSettings = { navController.navigate("settings") }
             )
+        }
+        composable("settings") {
+            SettingsScreen(onBack = { navController.popBackStack() })
         }
         composable(
             route = "editor/{profileId}",

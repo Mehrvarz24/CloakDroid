@@ -38,8 +38,8 @@ class ProfileViewModel @Inject constructor(
         )
 
         private val TAG_COLORS = listOf(
-            "0xFF6366F1", "0xFF22C55E", "0xFFEF4444", "0xFFF59E0B",
-            "0xFF06B6D4", "0xFFEC4899", "0xFF8B5CF6", "0xFF14B8A6"
+            "0xFFD9A05B", "0xFF8FA98F", "0xFFD97A6C", "0xFFD9B25B",
+            "0xFF8FB0C9", "0xFFC99AA4", "0xFFA9927F", "0xFF7FA97A"
         )
     }
 
@@ -91,7 +91,7 @@ class ProfileViewModel @Inject constructor(
             ProfileEntity(
                 id = "adhoc",
                 name = "adhoc",
-                tagColor = "0xFF6366F1",
+                tagColor = "0xFFD9A05B",
                 userAgent = "",
                 proxyType = proxyType,
                 proxyHost = host,
