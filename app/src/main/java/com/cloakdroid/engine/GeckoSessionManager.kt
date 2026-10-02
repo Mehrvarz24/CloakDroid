@@ -17,6 +17,13 @@ import org.mozilla.geckoview.GeckoSession
  * [setProfileUserAgent]) is serialised on a private lock so the session
  * lifecycle can never race with itself, and so the flows always describe a
  * consistent (session, url) pair.
+ *
+ * Kill switch: when [killSwitchEnabled] is on and the active profile has a
+ * proxy, every navigation is inspected in [onLoadRequest]. If the proxy stops
+ * answering (a load fails at the network level), the manager latches into a
+ * blocked state: further loads are refused until the user launches the
+ * profile again (or turns the kill switch off), so the real IP can never
+ * silently take over mid-session.
  */
 @Singleton
 class GeckoSessionManager @Inject constructor(
@@ -45,6 +52,15 @@ class GeckoSessionManager @Inject constructor(
     /** URL currently (or last) requested from the active session. */
     val currentUrl: StateFlow<String> = _currentUrl.asStateFlow()
 
+    /**
+     * Kill switch state for the UI: `true` while the manager refuses to load
+     * anything because the proxied connection failed. Reset on launch.
+     */
+    private val _blocked = MutableStateFlow(false)
+
+    /** `true` when navigation is currently refused (proxy failed, kill switch armed). */
+    val blocked: StateFlow<Boolean> = _blocked.asStateFlow()
+
     /** The profile that owns the current session, `null` when none is open. */
     @Volatile
     var currentProfileId: String? = null
@@ -60,6 +76,7 @@ class GeckoSessionManager @Inject constructor(
      */
     fun launch(profileId: String, url: String): GeckoSession = synchronized(lock) {
         closeCurrentLocked()
+        _blocked.value = false
 
         // Ensure the process-wide runtime matches this profile's proxy. The
         // runtime is recreated when the proxy changed since the last launch
@@ -85,27 +102,34 @@ class GeckoSessionManager @Inject constructor(
         _currentSession.value = session
         _currentUrl.value = url
         currentProfileId = profileId
-        attachHistoryRecorder(session, profileId)
+        attachSessionDelegate(session, profileId, proxy != null)
         Log.i(TAG, "launch profile=$profileId url=$url")
         session
     }
 
     /**
-     * Records every successfully loaded page of [session] into the
-     * per-profile history. The delegate registered here intentionally
-     * replaces the engine's logging delegate; the log lines it drops are
-     * duplicated below.
+     * Progress/content delegate that (a) records history, (b) publishes live
+     * location for the URL bar and (c) implements the kill switch: when a
+     * proxied load fails at the network level, latch [blocked] so nothing else
+     * loads until an explicit re-launch.
      */
-    private fun attachHistoryRecorder(session: GeckoSession, profileId: String) {
+    private fun attachSessionDelegate(session: GeckoSession, profileId: String, proxied: Boolean) {
         try {
             session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
                 override fun onPageStart(s: GeckoSession, url: String) {
                     Log.d(TAG, "pageStart [${System.identityHashCode(s)}] url=$url")
+                    _currentUrl.value = url
                 }
 
                 override fun onPageStop(s: GeckoSession, success: Boolean) {
                     Log.d(TAG, "pageStop [${System.identityHashCode(s)}] success=$success")
-                    if (!success) return
+                    if (!success) {
+                        if (proxied && com.cloakdroid.ui.settings.ThemeController.killSwitchEnabled) {
+                            Log.w(TAG, "KILL SWITCH: proxied load failed, blocking further loads")
+                            _blocked.value = true
+                        }
+                        return
+                    }
                     val visitedUrl = _currentUrl.value
                     if (visitedUrl.isBlank() || visitedUrl == BLANK_URL) return
                     ioScope.launch {
@@ -119,18 +143,22 @@ class GeckoSessionManager @Inject constructor(
                 }
             })
         } catch (t: Throwable) {
-            Log.w(TAG, "failed to attach history recorder", t)
+            Log.w(TAG, "failed to attach session delegate", t)
         }
     }
 
     private fun String.toUri(): android.net.Uri = android.net.Uri.parse(this)
 
     /**
-     * Navigates the current session to [url]. No-op (with a warning) when no
-     * session is open - call [launch] instead to create one.
+     * Navigates the current session to [url]. Refused while the kill switch
+     * has latched [blocked] — the caller (UI) should offer a re-launch.
      */
     fun loadUrl(url: String) {
         synchronized(lock) {
+            if (_blocked.value) {
+                Log.w(TAG, "loadUrl refused by kill switch: $url")
+                return
+            }
             val session = _currentSession.value
             if (session == null) {
                 Log.w(TAG, "loadUrl ignored, no open session: $url")
@@ -144,6 +172,14 @@ class GeckoSessionManager @Inject constructor(
                 Log.w(TAG, "loadUrl failed: $url", t)
             }
         }
+    }
+
+    /**
+     * Clears the kill-switch latch so navigation is allowed again. The user
+     * explicitly accepts that the connection may now be direct.
+     */
+    fun unblock() {
+        synchronized(lock) { _blocked.value = false }
     }
 
     /**

@@ -52,6 +52,51 @@ class ProfileViewModel @Inject constructor(
     /** Number of profiles created by the most recent batch generation. */
     val lastBatchCreated = MutableStateFlow(0)
 
+    /** Bulk "Test all": progress state. profileId -> result summary. */
+    data class BulkEntry(val name: String, val ok: Boolean, val latencyMs: Long)
+    val bulkTesting = MutableStateFlow(false)
+    val bulkProgress = MutableStateFlow(0)
+    val bulkTotal = MutableStateFlow(0)
+    val bulkResults = MutableStateFlow<List<BulkEntry>>(emptyList())
+
+    /**
+     * Tests every profile with a proxy configured, sequentially (so we don't
+     * hammer the network), publishing progress. Results arrive sorted by
+     * latency (fastest first; failures last).
+     */
+    fun testAllProfiles() {
+        if (bulkTesting.value) return
+        val snapshot = profiles.value.filter { !it.proxyHost.isNullOrBlank() }
+        if (snapshot.isEmpty()) return
+        bulkTesting.value = true
+        bulkProgress.value = 0
+        bulkTotal.value = snapshot.size
+        bulkResults.value = emptyList()
+        viewModelScope.launch {
+            val results = mutableListOf<BulkEntry>()
+            try {
+                snapshot.forEach { profile ->
+                    val entry = try {
+                        when (val r = repo.testProxyFor(profile)) {
+                            is com.cloakdroid.data.network.ProxyTestResult.Success ->
+                                BulkEntry(profile.name, true, r.latencyMs)
+                            else -> BulkEntry(profile.name, false, 0)
+                        }
+                    } catch (t: Throwable) {
+                        BulkEntry(profile.name, false, 0)
+                    }
+                    results.add(entry)
+                    bulkResults.value = results.sortedWith(
+                        compareByDescending<BulkEntry> { it.ok }.thenBy { it.latencyMs }
+                    )
+                    bulkProgress.value = bulkProgress.value + 1
+                }
+            } finally {
+                bulkTesting.value = false
+            }
+        }
+    }
+
     fun save(profile: ProfileEntity) {
         viewModelScope.launch { repo.saveProfile(profile) }
     }

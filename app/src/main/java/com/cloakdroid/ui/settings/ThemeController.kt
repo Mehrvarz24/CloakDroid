@@ -27,6 +27,7 @@ object ThemeController {
     private const val KEY_MODE = "theme_mode"
     private const val KEY_ACCENT = "accent"
     private const val KEY_BG_IMAGE = "bg_image"
+    private const val KEY_KILL_SWITCH = "kill_switch"
 
     var themeMode by mutableStateOf(ThemeMode.DARK)
         private set
@@ -36,6 +37,10 @@ object ThemeController {
 
     /** Absolute path of the user's custom background image, or null. */
     var backgroundImagePath by mutableStateOf<String?>(null)
+        private set
+
+    /** Kill switch: refuse all navigation if the proxied connection fails. */
+    var killSwitchEnabled by mutableStateOf(true)
         private set
 
     private var prefs: SharedPreferences? = null
@@ -48,6 +53,7 @@ object ThemeController {
         accent = runCatching { Accent.valueOf(prefs!!.getString(KEY_ACCENT, Accent.CARAMEL.name)!!) }
             .getOrDefault(Accent.CARAMEL)
         backgroundImagePath = prefs!!.getString(KEY_BG_IMAGE, null)
+        killSwitchEnabled = prefs!!.getBoolean(KEY_KILL_SWITCH, true)
     }
 
     @JvmName("applyThemeMode")
@@ -60,6 +66,12 @@ object ThemeController {
     fun setAccent(a: Accent) {
         accent = a
         prefs?.edit()?.putString(KEY_ACCENT, a.name)?.apply()
+    }
+
+    @JvmName("setKillSwitch")
+    fun setKillSwitch(enabled: Boolean) {
+        killSwitchEnabled = enabled
+        prefs?.edit()?.putBoolean(KEY_KILL_SWITCH, enabled)?.apply()
     }
 
     /** Copies the picked image into app-private storage and activates it. */

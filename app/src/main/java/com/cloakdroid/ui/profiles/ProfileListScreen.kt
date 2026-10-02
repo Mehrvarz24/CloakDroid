@@ -49,6 +49,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -116,6 +117,11 @@ fun ProfileListScreen(
     var menuForId by remember { mutableStateOf<String?>(null) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     var showBatchDialog by remember { mutableStateOf(false) }
+    val bulkTesting by viewModel.bulkTesting.collectAsState()
+    val bulkResults by viewModel.bulkResults.collectAsState()
+    val bulkProgress by viewModel.bulkProgress.collectAsState()
+    val bulkTotal by viewModel.bulkTotal.collectAsState()
+    var showBulkSheet by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -366,14 +372,25 @@ fun ProfileListScreen(
             }
         },
         floatingActionButton = {
-            com.cloakdroid.ui.theme.CloakButtons.GradientButton(
-                text = "+  New Profile",
-                onClick = {
-                    val fresh = viewModel.newRandomProfile()
-                    viewModel.save(fresh)
-                },
-                height = 52.dp
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                com.cloakdroid.ui.theme.CloakButtons.GhostButton(
+                    text = if (bulkTesting) "Testing $bulkProgress/$bulkTotal…" else "⚡ Test All",
+                    onClick = {
+                        viewModel.testAllProfiles()
+                        showBulkSheet = true
+                    },
+                    height = 44.dp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                com.cloakdroid.ui.theme.CloakButtons.GradientButton(
+                    text = "+  New Profile",
+                    onClick = {
+                        val fresh = viewModel.newRandomProfile()
+                        viewModel.save(fresh)
+                    },
+                    height = 52.dp
+                )
+            }
         }
     ) { innerPadding ->
         Column(
@@ -493,6 +510,81 @@ fun ProfileListScreen(
             }
         }
     }
+
+        // ---- Bulk test results sheet ----------------------------------------
+        if (showBulkSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showBulkSheet = false },
+                containerColor = com.cloakdroid.ui.theme.CloakColors.Surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp)
+                ) {
+                    Text(
+                        "Proxy Test Results",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = com.cloakdroid.ui.theme.CloakColors.TextHigh
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        if (bulkTesting) "Testing $bulkProgress of $bulkTotal…"
+                        else "Sorted by latency — fastest first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = com.cloakdroid.ui.theme.CloakColors.TextMuted
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    if (bulkResults.isEmpty()) {
+                        Text(
+                            "No proxy profiles to test.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = com.cloakdroid.ui.theme.CloakColors.TextMuted
+                        )
+                    } else {
+                        bulkResults.forEachIndexed { i, entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${i + 1}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = com.cloakdroid.ui.theme.CloakColors.TextFaint,
+                                    modifier = Modifier.width(24.dp)
+                                )
+                                Text(
+                                    entry.name,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = com.cloakdroid.ui.theme.CloakColors.TextHigh
+                                )
+                                if (entry.ok) {
+                                    Text(
+                                        "${entry.latencyMs} ms",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = com.cloakdroid.ui.theme.CloakColors.Success
+                                    )
+                                } else {
+                                    Text(
+                                        "Failed",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = com.cloakdroid.ui.theme.CloakColors.Error
+                                    )
+                                }
+                            }
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = com.cloakdroid.ui.theme.CloakColors.GlassBorder
+                            )
+                        }
+                    }
+                }
+            }
+        }
 }
 
 /**
@@ -658,9 +750,9 @@ private fun ProfileCard(
             }
         }
     }
+
 }
 
-/** Empty-state card with a pulsing shield glyph. */
 @Composable
 private fun EmptyState(queryText: String) {
     val isFiltering = queryText.isNotBlank()
@@ -731,5 +823,6 @@ private fun EmptyState(queryText: String) {
                 }
             }
         }
+
     }
 }

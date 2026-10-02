@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,6 +30,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -57,6 +60,7 @@ fun SettingsScreen(
     var mode by remember { mutableStateOf(ThemeController.themeMode) }
     var accent by remember { mutableStateOf(ThemeController.accent) }
     var hasBgImage by remember { mutableStateOf(ThemeController.backgroundImagePath != null) }
+    var killSwitch by remember { mutableStateOf(ThemeController.killSwitchEnabled) }
 
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -96,6 +100,39 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            SettingsCard(title = "Security") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Kill switch",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = CloakColors.TextHigh
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "If the proxy connection fails, all browsing stops so your real IP can never leak.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CloakColors.TextMuted
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = killSwitch,
+                        onCheckedChange = {
+                            killSwitch = it
+                            ThemeController.setKillSwitch(it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = CloakColors.Primary,
+                            checkedThumbColor = Color(0xFF231A0E)
+                        )
+                    )
+                }
+            }
+
             SettingsCard(title = "Theme") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeMode.entries.forEach { m ->

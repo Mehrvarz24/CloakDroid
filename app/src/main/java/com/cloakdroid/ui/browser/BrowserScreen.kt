@@ -1,5 +1,6 @@
 package com.cloakdroid.ui.browser
 
+import com.cloakdroid.ui.theme.CloakColors
 import com.cloakdroid.ui.theme.parseTagColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -9,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,7 +38,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -90,6 +95,7 @@ fun BrowserScreen(
 
     // Prefer the live engine URL for page-scoped actions (star, sheets).
     val currentUrl by sessionManager.currentUrl.collectAsStateWithLifecycle(initialValue = null)
+    val navBlocked by sessionManager.blocked.collectAsStateWithLifecycle(initialValue = false)
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val profile = profiles.find { it.id == profileId }
 
@@ -152,7 +158,7 @@ fun BrowserScreen(
                 keyboardActions = KeyboardActions(
                     onGo = {
                         focusManager.clearFocus()
-                        urlInput.trim().takeIf { it.isNotBlank() }?.let { session?.loadUri(it) }
+                        urlInput.trim().takeIf { it.isNotBlank() }?.let { sessionManager.loadUrl(it) }
                     }
                 ),
                 trailingIcon = {
@@ -246,6 +252,44 @@ fun BrowserScreen(
         }
 
         // ---- Content -------------------------------------------------------
+        if (navBlocked) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                color = CloakColors.Error.copy(alpha = 0.15f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, CloakColors.Error.copy(alpha = 0.5f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = CloakColors.Error
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "Kill switch active — the proxy connection failed. Browsing is blocked to protect your IP.",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CloakColors.TextHigh
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    TextButton(onClick = {
+                        sessionManager.unblock()
+                        sessionManager.launch(profileId, DEFAULT_START_URL)
+                    }) {
+                        Text("Relaunch", color = CloakColors.Primary)
+                    }
+                }
+            }
+        }
+
         AndroidView(
             modifier = Modifier
                 .fillMaxWidth()
