@@ -1,6 +1,7 @@
 package com.cloakdroid.ui.profiles
 
 import com.cloakdroid.ui.theme.parseTagColor
+import com.cloakdroid.data.network.ProxyInputParser
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
@@ -405,8 +406,19 @@ fun ProfileEditorScreen(
 
                             OutlinedTextField(
                                 value = proxyHost,
-                                onValueChange = { proxyHost = it },
-                                label = { Text("Host") },
+                                onValueChange = { value ->
+                                    val pasted = ProxyInputParser.parse(value)
+                                    if (pasted != null) {
+                                        proxyHost = pasted.host
+                                        proxyPort = pasted.port.toString()
+                                        proxyType = pasted.type.name
+                                        proxyUsername = pasted.username.orEmpty()
+                                        proxyPassword = pasted.password.orEmpty()
+                                    } else {
+                                        proxyHost = value
+                                    }
+                                },
+                                label = { Text("Host or proxy URL") },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                                 modifier = Modifier.fillMaxWidth()
@@ -450,7 +462,7 @@ fun ProfileEditorScreen(
                                         proxyPassword
                                     )
                                 },
-                                enabled = proxyHost.isNotBlank() &&
+                                enabled = !testing && proxyHost.isNotBlank() &&
                                     (proxyPort.toIntOrNull() ?: 0) in 1..65535,
                                 modifier = Modifier.fillMaxWidth(),
                                 height = 48.dp
@@ -478,6 +490,8 @@ fun ProfileEditorScreen(
                                     ResultCard(ok = false, message = "The proxy did not respond in time (timeout).")
                                 result is com.cloakdroid.data.network.ProxyTestResult.AuthFailure ->
                                     ResultCard(ok = false, message = result.msg)
+                                result is com.cloakdroid.data.network.ProxyTestResult.Unsupported ->
+                                    ResultCard(ok = false, message = "Unsupported: ${result.msg}")
                                 result is com.cloakdroid.data.network.ProxyTestResult.NetworkError ->
                                     ResultCard(ok = false, message = result.msg)
                                 result is com.cloakdroid.data.network.ProxyTestResult.Success -> {
@@ -517,6 +531,13 @@ fun ProfileEditorScreen(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                                             )
+                                            result.metadataWarning?.let { warning ->
+                                                Text(
+                                                    text = "Warning: $warning",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
                                             Spacer(modifier = Modifier.height(8.dp))
                                             com.cloakdroid.ui.theme.CloakButtons.GhostButton(
                                                 text = "Apply matching timezone, locale & location",

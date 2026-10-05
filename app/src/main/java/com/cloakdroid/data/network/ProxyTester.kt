@@ -46,11 +46,13 @@ sealed interface ProxyTestResult {
         val lat: Double,
         val lon: Double,
         val suggestedTimezoneId: String,
-        val suggestedLocale: String
+        val suggestedLocale: String,
+        val metadataWarning: String? = null
     ) : ProxyTestResult
 
     object Timeout : ProxyTestResult
     data class AuthFailure(val msg: String) : ProxyTestResult
+    data class Unsupported(val msg: String) : ProxyTestResult
     data class NetworkError(val msg: String) : ProxyTestResult
 }
 
@@ -83,6 +85,17 @@ class ProxyTester @Inject constructor(
         val port = proxy.port ?: 0
         if (host.isEmpty() || port <= 0 || port > 65535) {
             return@withContext ProxyTestResult.NetworkError("Invalid proxy host/port: $host:$port")
+        }
+
+        if (proxy.type == ProxyType.SOCKS5 && !proxy.username.isNullOrBlank()) {
+            return@withContext ProxyTestResult.Unsupported(
+                "Authenticated SOCKS5 is not implemented by this client"
+            )
+        }
+        if (proxy.type == ProxyType.HTTPS) {
+            return@withContext ProxyTestResult.Unsupported(
+                "TLS-encrypted proxy endpoints are not implemented; HTTP CONNECT is supported"
+            )
         }
 
         val builder = OkHttpClient.Builder()
@@ -123,7 +136,11 @@ class ProxyTester @Inject constructor(
                 val password = proxy.password
                 if (!username.isNullOrEmpty()) {
                     builder.proxyAuthenticator { route: Route?, response: Response ->
-                        if (response.code == HTTP_PROXY_AUTH_REQUIRED ||
+                        // Never retry credentials indefinitely; OkHttp may invoke
+                        // the authenticator once per challenge/route.
+                        if (responseCount(response, HTTP_PROXY_AUTH_REQUIRED) >= MAX_AUTH_ATTEMPTS) {
+                            null
+                        } else if (response.code == HTTP_PROXY_AUTH_REQUIRED ||
                             response.header("Proxy-Authenticate") != null
                         ) {
                             val credential = Credentials.basic(username, password.orEmpty())
@@ -173,6 +190,8 @@ class ProxyTester @Inject constructor(
                     return ProxyTestResult.NetworkError("Empty public IP returned")
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: SocketTimeoutException) {
             return ProxyTestResult.Timeout
         } catch (e: java.net.ConnectException) {
@@ -203,7 +222,7 @@ class ProxyTester @Inject constructor(
 
         val latencyMs = (System.nanoTime() - startNanos) / 1_000_000L
 
-        val geo: GeoLookupResponse
+        var geo: GeoLookupResponse? = null
         try {
             val geoRequest = Request.Builder()
                 .url("$IP_API_URL/$ip")
@@ -223,29 +242,40 @@ class ProxyTester @Inject constructor(
                 val body = response.body?.string().orEmpty()
                 val parsed = runCatching {
                     json.decodeFromString(GeoLookupResponse.serializer(), body)
-                }.getOrElse { return ProxyTestResult.NetworkError("Malformed geo body") }
-
-                if (!parsed.success) {
-                    return ProxyTestResult.NetworkError(parsed.message ?: "Geo lookup failed")
-                }
-                geo = parsed
+                }.getOrNull()
+                geo = parsed?.takeIf { it.success }
             }
-        } catch (e: SocketTimeoutException) {
-            return ProxyTestResult.Timeout
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: SocketTimeoutException) {
+            geo = null
         } catch (e: IOException) {
-            return if (isAuthMessage(e.message)) {
-                ProxyTestResult.AuthFailure(e.message ?: "Authentication failed")
-            } else {
-                ProxyTestResult.NetworkError(e.message ?: "Geo lookup I/O failure")
-            }
-        } catch (e: Exception) {
-            return ProxyTestResult.NetworkError(e.message ?: "Unexpected geo failure")
+            if (isAuthMessage(e.message)) return ProxyTestResult.AuthFailure(e.message ?: "Authentication failed")
+            geo = null
+        } catch (_: Exception) {
+            geo = null
         }
 
-        val countryCode = geo.countryCode?.trim()?.uppercase().orEmpty().ifEmpty { "ZZ" }
+        if (geo == null) {
+            return ProxyTestResult.Success(
+                latencyMs = latencyMs,
+                publicIp = ip,
+                countryCode = "ZZ",
+                city = "Unknown",
+                isp = "Unknown",
+                lat = 0.0,
+                lon = 0.0,
+                suggestedTimezoneId = DEFAULT_TIMEZONE,
+                suggestedLocale = DEFAULT_LOCALE,
+                metadataWarning = "Public IP verified; location metadata is unavailable"
+            )
+        }
+
+        val resolvedGeo = geo ?: error("geo metadata unexpectedly unavailable")
+        val countryCode = resolvedGeo.countryCode?.trim()?.uppercase().orEmpty().ifEmpty { "ZZ" }
         // Prefer the timezone reported by the geo service itself (exact city-
         // level match), then fall back to the country-level map.
-        val geoTz = geo.timezone?.id?.trim().orEmpty()
+        val geoTz = resolvedGeo.timezone?.id?.trim().orEmpty()
         val (mapTz, mapLocale) = timezoneAndLocaleFor(countryCode)
         val tz = geoTz.ifEmpty { mapTz }
         val locale = if (geoTz.isEmpty()) mapLocale else suggestedLocaleFor(tz)
@@ -254,14 +284,14 @@ class ProxyTester @Inject constructor(
             latencyMs = latencyMs,
             publicIp = ip,
             countryCode = countryCode,
-            city = geo.city?.trim().orEmpty().ifEmpty { "Unknown" },
-            isp = geo.connection?.isp?.trim().orEmpty()
-                .ifEmpty { geo.isp?.trim().orEmpty() }
-                .ifEmpty { geo.connection?.org?.trim().orEmpty() }
-                .ifEmpty { geo.org?.trim().orEmpty() }
+            city = resolvedGeo.city?.trim().orEmpty().ifEmpty { "Unknown" },
+            isp = resolvedGeo.connection?.isp?.trim().orEmpty()
+                .ifEmpty { resolvedGeo.isp?.trim().orEmpty() }
+                .ifEmpty { resolvedGeo.connection?.org?.trim().orEmpty() }
+                .ifEmpty { resolvedGeo.org?.trim().orEmpty() }
                 .ifEmpty { "Unknown" },
-            lat = geo.latitude ?: geo.lat ?: 0.0,
-            lon = geo.longitude ?: geo.lon ?: 0.0,
+            lat = resolvedGeo.latitude ?: resolvedGeo.lat ?: 0.0,
+            lon = resolvedGeo.longitude ?: resolvedGeo.lon ?: 0.0,
             suggestedTimezoneId = tz,
             suggestedLocale = locale
         )
@@ -282,6 +312,16 @@ class ProxyTester @Inject constructor(
             val parts = r.split("-")
             if (parts.size == 2 && parts[1].length == 2) "en-${parts[1]}" else DEFAULT_LOCALE
         }
+    }
+
+    private fun responseCount(response: Response, code: Int): Int {
+        var count = 1
+        var prior = response.priorResponse
+        while (prior != null) {
+            if (prior.code == code) count++
+            prior = prior.priorResponse
+        }
+        return count
     }
 
     private fun isAuthMessage(message: String?): Boolean {
@@ -340,6 +380,7 @@ class ProxyTester @Inject constructor(
     companion object {
         private const val TIMEOUT_SECONDS = 15L
         private const val HTTP_PROXY_AUTH_REQUIRED = 407
+        private const val MAX_AUTH_ATTEMPTS = 3
         private const val USER_AGENT = "CloakDroid/1.0"
         private const val IPIFY_URL = "https://api.ipify.org?format=json"
         // ip-api.com free tier is HTTP-only and the app forbids cleartext

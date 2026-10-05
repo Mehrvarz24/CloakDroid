@@ -11,9 +11,8 @@ import java.util.UUID
  * Per-profile WebRTC policy.
  *
  * DISABLED  - RTCPeerConnection is removed entirely (strongest, default).
- * PROXY_ONLY- WebRTC stays functional; a real connection would still use the
- *             system network, but pages can no longer enumerate local host
- *             candidates, which is what leaks the real IP behind a proxy.
+ * PROXY_ONLY- A best-effort page-level candidate policy. Native WebRTC
+ *             routing is not guaranteed and must be verified on-device.
  * FULL      - WebRTC is left untouched.
  */
 enum class WebRtcPolicy {
@@ -72,8 +71,8 @@ data class ProfileEntity(
 
     /**
      * WebRTC policy: DISABLED (default) removes RTCPeerConnection entirely,
-     * PROXY_ONLY keeps WebRTC but makes public IP leakage practically
-     * impossible, FULL leaves it untouched.
+     * PROXY_ONLY applies a best-effort page-level candidate policy; native
+     * WebRTC routing is not guaranteed. FULL leaves it untouched.
      */
     @ColumnInfo(name = "webrtc_policy")
     val webrtcPolicy: String = WebRtcPolicy.DISABLED.name,

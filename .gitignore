@@ -13,3 +13,7 @@ captures/
 *.raw.json
 body.json
 curl.pid
+
+# Local signing material
+*.keystore
+*.jks

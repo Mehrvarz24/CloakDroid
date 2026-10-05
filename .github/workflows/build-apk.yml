@@ -2,9 +2,15 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
+      - 'arena/**'
   pull_request:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
+      - 'arena/**'
   workflow_dispatch:
 
 permissions:
@@ -32,8 +38,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace --no-daemon
+      - name: Verify, test, lint, and build debug APK
+        run: gradle testDebugUnitTest lintDebug assembleDebug --stacktrace --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

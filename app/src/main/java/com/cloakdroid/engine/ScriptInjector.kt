@@ -7,7 +7,9 @@ import java.util.Locale
  * CloakDroid engine in order to mask / normalize browser fingerprints.
  *
  * The generated script is self-contained, has no external dependencies and
- * runs before any page script (document_start injection).
+ * This builder only creates a payload. It is not a document_start injector by
+ * itself; a Gecko WebExtension/content-script integration is required before
+ * this can be treated as active privacy protection.
  */
 object ScriptInjector {
 
@@ -249,40 +251,12 @@ object ScriptInjector {
 
   /* ------------------------------------------------------- permissions */
 
+  /* Never fabricate Android permission state. The native permission result is
+   * the only source of truth; without this passthrough a page could be told
+   * that camera, microphone, or location is granted when it is not. */
   if (hasNav && navigator.permissions && typeof navigator.permissions.query === 'function') {
     var origQuery = navigator.permissions.query;
-    var grantedFor = {
-      geolocation: true,
-      notifications: true,
-      camera: true,
-      microphone: true,
-      midi: true,
-      bluetooth: true,
-      'persistent-storage': true
-    };
     navigator.permissions.query = function (descriptor) {
-      var name = descriptor && descriptor.name;
-      if (name && grantedFor[name] === true) {
-        var status = {
-          state: 'granted',
-          status: 'granted',
-          name: name,
-          onchange: null,
-          addEventListener: function () { return undefined; },
-          removeEventListener: function () { return undefined; },
-          dispatchEvent: function () { return true; },
-          on: function () { return undefined; },
-          off: function () { return undefined; },
-          once: function () { return undefined; }
-        };
-        try {
-          if (typeof EventTarget !== 'undefined') {
-            EventTarget.call(status);
-            Object.setPrototypeOf(status, EventTarget.prototype);
-          }
-        } catch (e) { /* ignore */ }
-        return Promise.resolve(status);
-      }
       try {
         return origQuery.call(this, descriptor);
       } catch (e) {

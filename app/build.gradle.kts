@@ -112,6 +112,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
 
+    testImplementation("junit:junit:4.13.2")
+
     // Hilt
     implementation("com.google.dagger:hilt-android:2.51.1")
     ksp("com.google.dagger:hilt-android-compiler:2.51.1")

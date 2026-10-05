@@ -13,9 +13,11 @@ import com.cloakdroid.data.network.ProxyConfig
 import com.cloakdroid.data.network.ProxyTester
 import com.cloakdroid.data.network.ProxyTestResult
 import com.cloakdroid.data.network.ProxyType
+import com.cloakdroid.data.security.CredentialCipher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -61,6 +63,7 @@ class ProfileRepository @Inject constructor(
     private val historyDao: HistoryDao,
     private val database: AppDatabase,
     private val proxyTester: ProxyTester,
+    private val credentialCipher: CredentialCipher,
     @ApplicationContext private val context: Context
 ) {
 
@@ -70,11 +73,22 @@ class ProfileRepository @Inject constructor(
         encodeDefaults = true
     }
 
-    fun observeProfiles(): Flow<List<ProfileEntity>> = dao.observeAll()
+    fun observeProfiles(): Flow<List<ProfileEntity>> =
+        dao.observeAll().map { profiles -> profiles.map(::decryptCredentials) }
 
     suspend fun saveProfile(profile: ProfileEntity) {
-        dao.upsert(profile)
+        dao.upsert(encryptCredentials(profile))
     }
+
+    private fun encryptCredentials(profile: ProfileEntity): ProfileEntity = profile.copy(
+        proxyUsername = credentialCipher.encrypt(profile.proxyUsername),
+        proxyPassword = credentialCipher.encrypt(profile.proxyPassword)
+    )
+
+    private fun decryptCredentials(profile: ProfileEntity): ProfileEntity = profile.copy(
+        proxyUsername = credentialCipher.decrypt(profile.proxyUsername),
+        proxyPassword = credentialCipher.decrypt(profile.proxyPassword)
+    )
 
     suspend fun deleteProfile(id: String) {
         dao.deleteById(id)
@@ -87,14 +101,14 @@ class ProfileRepository @Inject constructor(
     }
 
     suspend fun cloneProfile(id: String): ProfileEntity? {
-        val source = dao.getById(id) ?: return null
+        val source = dao.getById(id)?.let(::decryptCredentials) ?: return null
         val copy = source.copy(
             id = UUID.randomUUID().toString(),
             name = source.name + " (copy)",
             createdAt = System.currentTimeMillis(),
             lastUsedAt = 0L
         )
-        dao.upsert(copy)
+        dao.upsert(encryptCredentials(copy))
         return copy
     }
 
@@ -123,9 +137,25 @@ class ProfileRepository @Inject constructor(
         kotlinx.coroutines.runBlocking { proxyConfigForSuspend(profileId) }
 
     private suspend fun proxyConfigForSuspend(profileId: String): ProxyConfig? {
-        val profile = dao.getById(profileId) ?: return null
-        if (profile.proxyHost.isNullOrBlank()) return null
+        val profile = dao.getById(profileId)?.let(::decryptCredentials) ?: return null
         val rawType = profile.proxyType.uppercase()
+        if (rawType == "DIRECT" && profile.proxyHost.isNullOrBlank()) return null
+        if (profile.proxyHost.isNullOrBlank()) {
+            // Preserve the intended non-direct mode so the engine can reject
+            // the invalid configuration instead of silently using Direct.
+            return ProxyConfig(
+                host = profile.proxyHost,
+                port = profile.proxyPort,
+                username = profile.proxyUsername,
+                password = profile.proxyPassword,
+                type = when {
+                    rawType.contains("SOCKS") -> ProxyType.SOCKS5
+                    rawType == "HTTPS" -> ProxyType.HTTPS
+                    rawType == "HTTP" -> ProxyType.HTTP
+                    else -> return null
+                }
+            )
+        }
         val proxyType = when {
             rawType.contains("SOCKS") -> ProxyType.SOCKS5
             rawType.contains("HTTPS") -> ProxyType.HTTPS
@@ -151,11 +181,11 @@ class ProfileRepository @Inject constructor(
     suspend fun testProxyFor(profile: ProfileEntity): ProxyTestResult {
         val rawType = profile.proxyType.uppercase()
         val proxyType = when {
-            profile.proxyHost.isNullOrBlank() -> ProxyType.DIRECT
+            profile.proxyHost.isNullOrBlank() && rawType == "DIRECT" -> ProxyType.DIRECT
             rawType.contains("SOCKS") -> ProxyType.SOCKS5
-            rawType.contains("HTTPS") -> ProxyType.HTTPS
-            rawType.contains("HTTP") -> ProxyType.HTTP
-            else -> ProxyType.DIRECT
+            rawType == "HTTPS" -> ProxyType.HTTPS
+            rawType == "HTTP" -> ProxyType.HTTP
+            else -> return ProxyTestResult.Unsupported("Unknown proxy type: ${profile.proxyType}")
         }
 
         val config = ProxyConfig(
@@ -203,7 +233,7 @@ class ProfileRepository @Inject constructor(
     }
 
     suspend fun exportProfile(id: String): String? {
-        val profile = dao.getById(id) ?: return null
+        val profile = dao.getById(id)?.let(::decryptCredentials) ?: return null
         val transfer = ProfileTransfer(
             id = profile.id,
             name = profile.name,
@@ -265,7 +295,7 @@ class ProfileRepository @Inject constructor(
                 createdAt = now,
                 lastUsedAt = now
             )
-            dao.upsert(profile)
+            dao.upsert(encryptCredentials(profile))
             profile
         } catch (t: Throwable) {
             null

@@ -48,6 +48,7 @@ class ProfileViewModel @Inject constructor(
 
     val testResult = MutableStateFlow<ProxyTestResult?>(null)
     val testing = MutableStateFlow(false)
+    private var testGeneration = 0L
 
     /** Number of profiles created by the most recent batch generation. */
     val lastBatchCreated = MutableStateFlow(0)
@@ -114,13 +115,16 @@ class ProfileViewModel @Inject constructor(
     }
 
     fun testProxy(profile: ProfileEntity) {
+        if (testing.value) return
+        val generation = ++testGeneration
         testResult.value = null
         testing.value = true
         viewModelScope.launch {
             try {
-                testResult.value = repo.testProxyFor(profile)
+                val result = repo.testProxyFor(profile)
+                if (generation == testGeneration) testResult.value = result
             } finally {
-                testing.value = false
+                if (generation == testGeneration) testing.value = false
             }
         }
     }

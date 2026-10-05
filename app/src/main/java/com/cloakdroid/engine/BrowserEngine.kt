@@ -51,12 +51,16 @@ class BrowserEngine @Inject constructor(
      */
     /**
      * The proxy currently configured on the runtime, or null for direct.
-     * Changing it after the runtime exists requires a runtime restart; the
-     * caller (GeckoSessionManager) recreates the runtime when the profile's
-     * proxy differs from the active one.
+     * Changing it after the runtime exists is refused. GeckoRuntime is
+     * process-lifetime state; a different proxy requires a fresh process.
      */
     @Volatile
     var activeProxy: ProxyConfig? = null
+        private set
+
+    /** Non-null when Gecko rejected/failed to receive the selected proxy prefs. */
+    @Volatile
+    var proxyConfigurationError: String? = null
         private set
 
     fun runtimeMatchesProxy(proxy: ProxyConfig?): Boolean =
@@ -83,14 +87,19 @@ class BrowserEngine @Inject constructor(
     fun resetRuntime(proxy: ProxyConfig?) {
         synchronized(runtimeLock) {
             if (activeProxy == proxy && runtimeRef != null) return
-            runtimeRef?.let { old ->
-                try { old.shutdown() } catch (t: Throwable) {
-                    Log.w(TAG, "runtime shutdown failed", t)
-                }
+            if (runtimeRef != null && activeProxy != proxy) {
+                // GeckoRuntime is process-lifetime state. Shutting it down while
+                // switching a focused tab/profile is not a safe way to obtain
+                // per-profile routing and can invalidate attached GeckoViews.
+                // Refuse the switch; the caller must keep the current runtime
+                // or restart the application under an explicit future policy.
+                throw IllegalStateException(
+                    "A different proxy requires a fresh process; runtime reset is refused"
+                )
             }
-            runtimeRef = null
             activeProxy = proxy
-            Log.i(TAG, "GeckoRuntime reset for proxy=${proxy?.type}")
+            proxyConfigurationError = null
+            Log.i(TAG, "GeckoRuntime configured for proxy=${proxy?.type}")
         }
     }
 
@@ -172,9 +181,11 @@ class BrowserEngine @Inject constructor(
             )
             method.isAccessible = true
             method.invoke(runtime, bundle)
+            proxyConfigurationError = null
             Log.i(TAG, "Applied ${'$'}{prefs.size} proxy prefs to runtime")
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to apply proxy prefs", t)
+            proxyConfigurationError = "Gecko proxy preferences could not be applied"
+            Log.e(TAG, "Failed to apply proxy prefs; refusing to claim proxy routing", t)
         }
     }
 
